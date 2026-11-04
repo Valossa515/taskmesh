@@ -1,0 +1,39 @@
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: taskmesh-postgres
+    environment:
+      POSTGRES_DB: taskmesh
+      POSTGRES_USER: taskmesh
+      POSTGRES_PASSWORD: taskmesh_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskmesh -d taskmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: taskmesh-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: taskmesh
+      RABBITMQ_DEFAULT_PASS: taskmesh_dev
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  rabbitmq_data:

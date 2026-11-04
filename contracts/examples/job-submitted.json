@@ -1,0 +1,17 @@
+
+{
+  "eventId": "8f7c4c8e-81b5-4b65-a60a-123456789abc",
+  "eventType": "job.submitted",
+  "schemaVersion": "1.0",
+  "occurredAt": "2026-11-03T14:00:00Z",
+  "data": {
+    "jobId": "a8c2f1a0-1b2c-4d5e-8f90-123456789abc",
+    "jobType": "SEND_EMAIL",
+    "payload": {
+      "recipient": "user@example.com",
+      "subject": "TaskMesh test"
+    },
+    "priority": 5,
+    "maxAttempts": 3
+  }
+}
