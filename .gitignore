@@ -1,0 +1,23 @@
+# Java / Gradle
+.gradle/
+**/build/
+*.class
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Operating systems
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
