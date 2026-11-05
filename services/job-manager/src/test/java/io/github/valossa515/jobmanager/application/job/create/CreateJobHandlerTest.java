@@ -1,61 +1,146 @@
+
 package io.github.valossa515.jobmanager.application.job.create;
 
 import io.github.valossa515.jobmanager.application.port.IJobRepository;
+import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
 import io.github.valossa515.jobmanager.domain.model.Job;
 import io.github.valossa515.jobmanager.domain.model.JobStatus;
+import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
 import io.github.valossa515.jobmanager.job.create.CreateJobCommand;
 import io.github.valossa515.jobmanager.job.create.CreateJobHandler;
+import io.github.valossa515.jobmanager.job.create.JobSubmittedEventFactory;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-public class CreateJobHandlerTest {
-    @Test
-    void shouldCreateAndPersistPendingJob() {
-        // Arrange
-        IJobRepository repository = mock(IJobRepository.class);
+class CreateJobHandlerTest {
 
-        when(repository.save(any(Job.class)))
+    @Test
+    void shouldCreateAndPersistPendingJobAndOutboxEvent() {
+        IJobRepository jobRepository = mock(IJobRepository.class);
+        IOutboxRepository outboxRepository = mock(IOutboxRepository.class);
+        JobSubmittedEventFactory eventFactory =
+                mock(JobSubmittedEventFactory.class);
+
+        when(jobRepository.save(any(Job.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        CreateJobHandler handler = new CreateJobHandler(repository);
+        when(eventFactory.create(any(Job.class)))
+                .thenAnswer(invocation -> {
+                    Job job = invocation.getArgument(0);
+
+                    return OutboxEvent.create(
+                            job.getId(),
+                            "job.submitted",
+                            "job.submitted",
+                            "{}"
+                    );
+                });
+
+        CreateJobHandler handler = new CreateJobHandler(
+                jobRepository,
+                outboxRepository,
+                eventFactory
+        );
 
         CreateJobCommand command = new CreateJobCommand(
                 "REPORT_GENERATION",
                 "{}"
         );
 
-        // Act
         Job result = handler.handle(command);
 
-        // Assert
         assertNotNull(result);
         assertEquals(JobStatus.PENDING, result.getStatus());
         assertEquals("REPORT_GENERATION", result.getType());
         assertEquals("{}", result.getPayload());
 
-        verify(repository, times(1)).save(any(Job.class));
-        verifyNoMoreInteractions(repository);
+        verify(jobRepository, times(1)).save(any(Job.class));
+        verify(eventFactory, times(1)).create(result);
+        verify(outboxRepository, times(1))
+                .save(any(OutboxEvent.class));
+
+        verifyNoMoreInteractions(
+                jobRepository,
+                outboxRepository,
+                eventFactory
+        );
     }
 
     @Test
     void shouldRejectInvalidCommandWithoutPersisting() {
-        // Arrange
-        IJobRepository repository = mock(IJobRepository.class);
-        CreateJobHandler handler = new CreateJobHandler(repository);
+        IJobRepository jobRepository = mock(IJobRepository.class);
+        IOutboxRepository outboxRepository = mock(IOutboxRepository.class);
+        JobSubmittedEventFactory eventFactory =
+                mock(JobSubmittedEventFactory.class);
+
+        CreateJobHandler handler = new CreateJobHandler(
+                jobRepository,
+                outboxRepository,
+                eventFactory
+        );
 
         CreateJobCommand command = new CreateJobCommand(
                 "",
                 "{}"
         );
 
-        // Act & Assert
         assertThrows(
                 IllegalArgumentException.class,
                 () -> handler.handle(command)
         );
 
-        verifyNoInteractions(repository);
+        verifyNoInteractions(
+                jobRepository,
+                outboxRepository,
+                eventFactory
+        );
+    }
+
+    @Test
+    void shouldPropagateOutboxPersistenceFailure() {
+        IJobRepository jobRepository = mock(IJobRepository.class);
+        IOutboxRepository outboxRepository = mock(IOutboxRepository.class);
+        JobSubmittedEventFactory eventFactory =
+                mock(JobSubmittedEventFactory.class);
+
+        when(jobRepository.save(any(Job.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        when(eventFactory.create(any(Job.class)))
+                .thenAnswer(invocation -> {
+                    Job job = invocation.getArgument(0);
+
+                    return OutboxEvent.create(
+                            job.getId(),
+                            "job.submitted",
+                            "job.submitted",
+                            "{}"
+                    );
+                });
+
+        when(outboxRepository.save(any(OutboxEvent.class)))
+                .thenThrow(new IllegalStateException(
+                        "Outbox persistence failed"
+                ));
+
+        CreateJobHandler handler = new CreateJobHandler(
+                jobRepository,
+                outboxRepository,
+                eventFactory
+        );
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> handler.handle(
+                        new CreateJobCommand("NO_OP", "{}")
+                )
+        );
+
+        verify(jobRepository).save(any(Job.class));
+        verify(outboxRepository).save(any(OutboxEvent.class));
     }
 }

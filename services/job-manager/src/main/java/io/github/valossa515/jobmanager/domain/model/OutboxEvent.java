@@ -61,21 +61,40 @@ public class OutboxEvent {
         this.publishedAt = publishedAt;
     }
 
+
     public static OutboxEvent create(
             UUID aggregateId,
             String eventType,
             String routingKey,
             String payload
     ) {
-        return new OutboxEvent(
+        return create(
                 UUID.randomUUID(),
+                aggregateId,
+                eventType,
+                routingKey,
+                payload,
+                Instant.now()
+        );
+    }
+
+    public static OutboxEvent create(
+            UUID id,
+            UUID aggregateId,
+            String eventType,
+            String routingKey,
+            String payload,
+            Instant createdAt
+    ) {
+        return new OutboxEvent(
+                id,
                 aggregateId,
                 eventType,
                 routingKey,
                 payload,
                 OutboxStatus.PENDING,
                 0,
-                Instant.now(),
+                createdAt,
                 null
         );
     }
