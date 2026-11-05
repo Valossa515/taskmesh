@@ -1,9 +1,11 @@
 package io.github.valossa515.jobmanager.job.create;
 
 import io.github.valossa515.jobmanager.domain.model.Job;
+import io.github.valossa515.jobmanager.support.IntegrationTestConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -14,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 @SpringBootTest
+@Import(IntegrationTestConfig.class)
 public class CreateJobCommitIntegrationTest {
 
     @Autowired
