@@ -1,4 +1,8 @@
 package io.github.valossa515.jobmanager.infrastructure.persistence;
 
-public class SpringDataOutboxRepository {
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.UUID;
+
+public interface SpringDataOutboxRepository extends JpaRepository<OutboxJpaEntity, UUID> {
 }
