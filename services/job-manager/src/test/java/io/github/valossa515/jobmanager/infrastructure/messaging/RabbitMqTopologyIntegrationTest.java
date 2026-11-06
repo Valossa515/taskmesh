@@ -22,7 +22,7 @@ import org.testcontainers.rabbitmq.RabbitMQContainer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "taskmesh.rabbitmq.initialize-on-startup=true")
 @Import({
         IntegrationTestConfig.class,
         RabbitMqTopologyIntegrationTest.RabbitTestConfig.class

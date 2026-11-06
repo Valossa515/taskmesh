@@ -2,6 +2,7 @@ package io.github.valossa515.jobmanager.infrastructure.messaging;
 
 import org.springframework.amqp.core.*;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -13,6 +14,7 @@ public class RabbitMqTopologyConfig {
     public static final String JOB_SUBMITTED_KEY = "job.submitted";
 
     @Bean
+    @ConditionalOnProperty(prefix = "taskmesh.rabbitmq", name = "initialize-on-startup", havingValue = "true", matchIfMissing = true)
     public ApplicationRunner initializeRabbitMqTopology(
             AmqpAdmin amqpAdmin
     ) {
