@@ -41,6 +41,15 @@ public class OutboxJpaEntity {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    @Column(name = "locked_by", length = 100)
+    private String lockedBy;
+
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
+    @Column(name = "lease_token")
+    private UUID leaseToken;
+
     protected OutboxJpaEntity() {
     }
 
@@ -85,5 +94,30 @@ public class OutboxJpaEntity {
     public Instant getPublishedAt() { return publishedAt; }
     public void setPublishedAt(Instant publishedAt) {
         this.publishedAt = publishedAt;
+    }
+
+
+    public String getLockedBy() {
+        return lockedBy;
+    }
+
+    public void setLockedBy(String lockedBy) {
+        this.lockedBy = lockedBy;
+    }
+
+    public Instant getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public void setLockedUntil(Instant lockedUntil) {
+        this.lockedUntil = lockedUntil;
+    }
+
+    public UUID getLeaseToken() {
+        return leaseToken;
+    }
+
+    public void setLeaseToken(UUID leaseToken) {
+        this.leaseToken = leaseToken;
     }
 }

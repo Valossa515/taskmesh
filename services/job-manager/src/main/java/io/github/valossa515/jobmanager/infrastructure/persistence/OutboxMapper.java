@@ -20,7 +20,9 @@ public final class OutboxMapper {
         entity.setAttempts(event.getAttempts());
         entity.setCreatedAt(event.getCreatedAt());
         entity.setPublishedAt(event.getPublishedAt());
-
+        entity.setLockedBy(event.getLockedBy());
+        entity.setLockedUntil(event.getLockedUntil());
+        entity.setLeaseToken(event.getLeaseToken());
         return entity;
     }
 
@@ -34,7 +36,10 @@ public final class OutboxMapper {
                 entity.getStatus(),
                 entity.getAttempts(),
                 entity.getCreatedAt(),
-                entity.getPublishedAt()
+                entity.getPublishedAt(),
+                entity.getLockedBy(),
+                entity.getLockedUntil(),
+                entity.getLeaseToken()
         );
     }
 }

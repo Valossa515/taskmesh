@@ -18,6 +18,10 @@ public class OutboxEvent {
     private int attempts;
     private Instant publishedAt;
 
+    private String lockedBy;
+    private Instant lockedUntil;
+    private UUID leaseToken;
+
     private OutboxEvent(
             UUID id,
             UUID aggregateId,
@@ -27,7 +31,10 @@ public class OutboxEvent {
             OutboxStatus status,
             int attempts,
             Instant createdAt,
-            Instant publishedAt
+            Instant publishedAt,
+            String lockedBy,
+            Instant lockedUntil,
+            UUID leaseToken
     ) {
         this.id = Objects.requireNonNull(id);
         this.aggregateId = Objects.requireNonNull(aggregateId);
@@ -57,10 +64,28 @@ public class OutboxEvent {
             );
         }
 
+        boolean hasLease = lockedBy != null
+                || lockedUntil != null
+                || leaseToken != null;
+
+        if (hasLease) {
+            if (status != OutboxStatus.PENDING
+                    || lockedBy == null
+                    || lockedBy.isBlank()
+                    || lockedUntil == null
+                    || leaseToken == null) {
+                throw new IllegalArgumentException(
+                        "Invalid outbox lease"
+                );
+            }
+        }
+
         this.attempts = attempts;
         this.publishedAt = publishedAt;
+        this.lockedBy = lockedBy;
+        this.lockedUntil = lockedUntil;
+        this.leaseToken = leaseToken;
     }
-
 
     public static OutboxEvent create(
             UUID aggregateId,
@@ -95,6 +120,9 @@ public class OutboxEvent {
                 OutboxStatus.PENDING,
                 0,
                 createdAt,
+                null,
+                null,
+                null,
                 null
         );
     }
@@ -110,17 +138,74 @@ public class OutboxEvent {
             Instant createdAt,
             Instant publishedAt
     ) {
-        return new OutboxEvent(
-                id,
-                aggregateId,
-                eventType,
-                routingKey,
-                payload,
-                status,
-                attempts,
-                createdAt,
-                publishedAt
+        return restore(
+                id, aggregateId, eventType, routingKey,
+                payload, status, attempts, createdAt,
+                publishedAt, null, null, null
         );
+    }
+
+    public static OutboxEvent restore(
+            UUID id,
+            UUID aggregateId,
+            String eventType,
+            String routingKey,
+            String payload,
+            OutboxStatus status,
+            int attempts,
+            Instant createdAt,
+            Instant publishedAt,
+            String lockedBy,
+            Instant lockedUntil,
+            UUID leaseToken
+    ) {
+        return new OutboxEvent(
+                id, aggregateId, eventType, routingKey,
+                payload, status, attempts, createdAt,
+                publishedAt, lockedBy, lockedUntil, leaseToken
+        );
+    }
+
+    public boolean isAvailableAt(Instant now) {
+        Objects.requireNonNull(now);
+
+        return status == OutboxStatus.PENDING
+                && (lockedUntil == null
+                || !lockedUntil.isAfter(now));
+    }
+
+    public void reserve(
+            String publisherId,
+            UUID token,
+            Instant now,
+            Instant expiresAt
+    ) {
+        Objects.requireNonNull(now);
+
+        if (publisherId == null || publisherId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Publisher ID must not be blank"
+            );
+        }
+
+        Objects.requireNonNull(token, "token is required");
+        Objects.requireNonNull(expiresAt, "expiresAt is required");
+
+        if (!expiresAt.isAfter(now)) {
+            throw new IllegalArgumentException(
+                    "Lease expiration must be after current time"
+            );
+        }
+
+        if (!isAvailableAt(now)) {
+            throw new IllegalStateException(
+                    "Event is not available for reservation"
+            );
+        }
+
+        this.lockedBy = publisherId;
+        this.lockedUntil = expiresAt;
+        this.leaseToken = token;
     }
 
     public void recordAttempt() {
@@ -133,15 +218,34 @@ public class OutboxEvent {
         this.attempts = Math.incrementExact(attempts);
     }
 
-    public void markPublished() {
+    public void markPublished(UUID token, Instant now) {
+        Objects.requireNonNull(token, "token is required");
+        Objects.requireNonNull(now, "now is required");
+
         if (status != OutboxStatus.PENDING) {
             throw new IllegalStateException(
                     "Event is already published"
             );
         }
 
+        if (leaseToken == null || !leaseToken.equals(token)) {
+            throw new IllegalStateException(
+                    "Invalid lease token"
+            );
+        }
+
+        if (lockedUntil == null || !lockedUntil.isAfter(now)) {
+            throw new IllegalStateException(
+                    "Lease has expired"
+            );
+        }
+
         this.status = OutboxStatus.PUBLISHED;
-        this.publishedAt = Instant.now();
+        this.publishedAt = now;
+
+        this.lockedBy = null;
+        this.lockedUntil = null;
+        this.leaseToken = null;
     }
 
     private static String requireText(String value) {
@@ -163,4 +267,8 @@ public class OutboxEvent {
     public int getAttempts() { return attempts; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getPublishedAt() { return publishedAt; }
+
+    public String getLockedBy() { return lockedBy; }
+    public Instant getLockedUntil() { return lockedUntil; }
+    public UUID getLeaseToken() { return leaseToken; }
 }
