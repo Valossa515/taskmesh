@@ -2,8 +2,11 @@ package io.github.valossa515.jobmanager.infrastructure.persistence;
 
 import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
 import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
+import io.github.valossa515.jobmanager.domain.model.OutboxStatus;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,5 +32,23 @@ public class OutboxRepositoryAdapter implements IOutboxRepository {
     public Optional<OutboxEvent> findById(UUID id) {
         return repository.findById(id)
                 .map(OutboxMapper::toDomain);
+    }
+
+    @Override
+    public List<OutboxEvent> findPending(int limit) {
+        if (limit <= 0) {
+            throw new IllegalArgumentException(
+                    "Limit must be greater than zero"
+            );
+        }
+
+        return repository
+                .findByStatusOrderByCreatedAtAscIdAsc(
+                        OutboxStatus.PENDING,
+                        PageRequest.of(0, limit)
+                )
+                .stream()
+                .map(OutboxMapper::toDomain)
+                .toList();
     }
 }
