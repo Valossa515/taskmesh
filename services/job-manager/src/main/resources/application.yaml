@@ -28,5 +28,11 @@ spring:
     template:
       mandatory: true
 
+taskmesh:
+  publisher:
+    confirm-timeout-seconds: 10
+    lease-seconds: 30
+    lease-safety-margin-seconds: 5
+
 server:
   port: 8080
