@@ -33,6 +33,10 @@ taskmesh:
     confirm-timeout-seconds: 10
     lease-seconds: 30
     lease-safety-margin-seconds: 5
+    scheduling:
+      enabled: false
+      fixed-delay-ms: 5000
+      initial-delay-ms: 5000
 
 server:
   port: 8080
