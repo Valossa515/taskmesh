@@ -65,16 +65,24 @@ public class OutboxPublishingService {
     }
 
 
-    public int publishBatch() {
-        var events = outboxRepository.reservePending(
-                publisherId,
-                batchSize,
-                leaseDuration
-        );
 
+    public int publishBatch() {
         int publishedCount = 0;
 
-        for (var event : events) {
+        for (int processed = 0; processed < batchSize; processed++) {
+
+            var events = outboxRepository.reservePending(
+                    publisherId,
+                    1,
+                    leaseDuration
+            );
+
+            if (events.isEmpty()) {
+                break;
+            }
+
+            var event = events.getFirst();
+
             try {
                 eventPublisher.publish(event);
 
@@ -98,6 +106,10 @@ public class OutboxPublishingService {
                         event.getId(),
                         exception.getMessage()
                 );
+
+                if (Thread.currentThread().isInterrupted()) {
+                    break;
+                }
             }
         }
 

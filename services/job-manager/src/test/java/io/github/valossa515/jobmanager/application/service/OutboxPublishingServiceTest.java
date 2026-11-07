@@ -9,6 +9,7 @@ import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -73,37 +74,51 @@ class OutboxPublishingServiceTest {
         OutboxEvent second = reservedEvent();
 
         when(outboxRepository.reservePending(
-                PUBLISHER_ID,
-                BATCH_SIZE,
-                LEASE_DURATION
-        )).thenReturn(List.of(first, second));
+                PUBLISHER_ID, 1, LEASE_DURATION
+        )).thenReturn(
+                List.of(first),
+                List.of(second),
+                List.of()
+        );
 
         when(outboxRepository.markPublished(
-                first.getId(),
-                first.getLeaseToken()
+                first.getId(), first.getLeaseToken()
         )).thenReturn(true);
 
         when(outboxRepository.markPublished(
-                second.getId(),
-                second.getLeaseToken()
+                second.getId(), second.getLeaseToken()
         )).thenReturn(true);
 
         int published = service.publishBatch();
 
         assertEquals(2, published);
 
-        verify(eventPublisher).publish(first);
-        verify(eventPublisher).publish(second);
-
-        verify(outboxRepository).markPublished(
-                first.getId(),
-                first.getLeaseToken()
+        InOrder order = inOrder(
+                outboxRepository,
+                eventPublisher
         );
 
-        verify(outboxRepository).markPublished(
-                second.getId(),
-                second.getLeaseToken()
+        order.verify(outboxRepository).reservePending(
+                PUBLISHER_ID, 1, LEASE_DURATION
         );
+        order.verify(eventPublisher).publish(first);
+        order.verify(outboxRepository).markPublished(
+                first.getId(), first.getLeaseToken()
+        );
+
+        order.verify(outboxRepository).reservePending(
+                PUBLISHER_ID, 1, LEASE_DURATION
+        );
+        order.verify(eventPublisher).publish(second);
+        order.verify(outboxRepository).markPublished(
+                second.getId(), second.getLeaseToken()
+        );
+
+        order.verify(outboxRepository).reservePending(
+                PUBLISHER_ID, 1, LEASE_DURATION
+        );
+
+        order.verifyNoMoreInteractions();
     }
 
     @Test
@@ -112,18 +127,19 @@ class OutboxPublishingServiceTest {
         OutboxEvent second = reservedEvent();
 
         when(outboxRepository.reservePending(
-                PUBLISHER_ID,
-                BATCH_SIZE,
-                LEASE_DURATION
-        )).thenReturn(List.of(first, second));
+                PUBLISHER_ID, 1, LEASE_DURATION
+        )).thenReturn(
+                List.of(first),
+                List.of(second),
+                List.of()
+        );
 
         doThrow(new EventPublicationException(
                 "Simulated RabbitMQ failure"
         )).when(eventPublisher).publish(first);
 
         when(outboxRepository.markPublished(
-                second.getId(),
-                second.getLeaseToken()
+                second.getId(), second.getLeaseToken()
         )).thenReturn(true);
 
         int published = service.publishBatch();
@@ -134,13 +150,11 @@ class OutboxPublishingServiceTest {
         verify(eventPublisher).publish(second);
 
         verify(outboxRepository, never()).markPublished(
-                first.getId(),
-                first.getLeaseToken()
+                first.getId(), first.getLeaseToken()
         );
 
         verify(outboxRepository).markPublished(
-                second.getId(),
-                second.getLeaseToken()
+                second.getId(), second.getLeaseToken()
         );
     }
 
@@ -149,40 +163,35 @@ class OutboxPublishingServiceTest {
         OutboxEvent event = reservedEvent();
 
         when(outboxRepository.reservePending(
-                PUBLISHER_ID,
-                BATCH_SIZE,
-                LEASE_DURATION
-        )).thenReturn(List.of(event));
+                PUBLISHER_ID, 1, LEASE_DURATION
+        )).thenReturn(
+                List.of(event),
+                List.of()
+        );
 
         when(outboxRepository.markPublished(
-                event.getId(),
-                event.getLeaseToken()
+                event.getId(), event.getLeaseToken()
         )).thenReturn(false);
 
         int published = service.publishBatch();
 
         assertEquals(0, published);
-
         verify(eventPublisher).publish(event);
 
         verify(outboxRepository).markPublished(
-                event.getId(),
-                event.getLeaseToken()
+                event.getId(), event.getLeaseToken()
         );
     }
 
     @Test
     void shouldReturnZeroWhenNoEventsAreAvailable() {
         when(outboxRepository.reservePending(
-                PUBLISHER_ID,
-                BATCH_SIZE,
-                LEASE_DURATION
+                PUBLISHER_ID, 1, LEASE_DURATION
         )).thenReturn(List.of());
 
         int published = service.publishBatch();
 
         assertEquals(0, published);
-
         verifyNoInteractions(eventPublisher);
 
         verify(outboxRepository, never())
@@ -194,10 +203,11 @@ class OutboxPublishingServiceTest {
         OutboxEvent event = reservedEvent();
 
         when(outboxRepository.reservePending(
-                PUBLISHER_ID,
-                BATCH_SIZE,
-                LEASE_DURATION
-        )).thenReturn(List.of(event));
+                PUBLISHER_ID, 1, LEASE_DURATION
+        )).thenReturn(
+                List.of(event),
+                List.of()
+        );
 
         doThrow(new EventPublicationException(
                 "Broker confirmation timed out"
@@ -208,9 +218,45 @@ class OutboxPublishingServiceTest {
         assertEquals(0, published);
 
         verify(eventPublisher).publish(event);
+        verify(outboxRepository, never())
+                .markPublished(any(), any());
+    }
 
-        verify(outboxRepository, never()).markPublished(
-                any(), any()
+    @Test
+    void shouldRespectBatchSizeLimit() {
+        OutboxEvent first = reservedEvent();
+        OutboxEvent second = reservedEvent();
+
+        OutboxPublishingService limitedService =
+                new OutboxPublishingService(
+                        outboxRepository,
+                        eventPublisher,
+                        PUBLISHER_ID,
+                        2,
+                        LEASE_DURATION
+                );
+
+        when(outboxRepository.reservePending(
+                PUBLISHER_ID, 1, LEASE_DURATION
+        )).thenReturn(
+                List.of(first),
+                List.of(second)
         );
+
+        when(outboxRepository.markPublished(
+                any(UUID.class),
+                any(UUID.class)
+        )).thenReturn(true);
+
+        int published = limitedService.publishBatch();
+
+        assertEquals(2, published);
+
+        verify(outboxRepository, times(2)).reservePending(
+                PUBLISHER_ID, 1, LEASE_DURATION
+        );
+
+        verify(eventPublisher, times(2))
+                .publish(any(OutboxEvent.class));
     }
 }
