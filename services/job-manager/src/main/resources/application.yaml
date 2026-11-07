@@ -23,6 +23,10 @@ spring:
     port: 5672
     username: taskmesh
     password: ${RABBITMQ_PASSWORD:taskmesh_dev}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
 
 server:
   port: 8080
