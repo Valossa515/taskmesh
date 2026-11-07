@@ -17,4 +17,5 @@ public interface IOutboxRepository {
             int limit,
             Duration leaseDuration
     );
+    boolean markPublished(UUID eventId, UUID leaseToken);
 }

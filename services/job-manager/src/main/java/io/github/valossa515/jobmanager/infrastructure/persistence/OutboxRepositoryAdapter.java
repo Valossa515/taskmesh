@@ -163,4 +163,11 @@ public class OutboxRepositoryAdapter implements IOutboxRepository {
                 )
         );
     }
+
+    @Override
+    public boolean markPublished(UUID eventId, UUID leaseToken) {
+        throw new UnsupportedOperationException(
+                "Conditional publication confirmation not implemented yet"
+        );
+    }
 }

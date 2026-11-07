@@ -5,6 +5,7 @@ import io.github.valossa515.jobmanager.application.port.IJobRepository;
 import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
 import io.github.valossa515.jobmanager.domain.model.Job;
 import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
+import io.github.valossa515.jobmanager.domain.model.OutboxStatus;
 import io.github.valossa515.jobmanager.support.IntegrationTestConfig;
 
 import org.junit.jupiter.api.Test;
@@ -293,5 +294,111 @@ class OutboxReservationConcurrencyIntegrationTest {
             releaseLock.countDown();
             executor.shutdownNow();
         }
+    }
+
+
+    @Test
+    void shouldRecoverExpiredLeaseWithNewPublisher() {
+        // Arrange: create a persisted job.
+        Job job = jobRepository.save(
+                Job.create("NO_OP", "{}")
+        );
+
+        UUID eventId = UUID.randomUUID();
+        UUID oldToken = UUID.randomUUID();
+
+        Instant createdAt = Instant.parse(
+                "1900-01-01T00:00:00Z"
+        );
+
+        Instant expiredAt = Instant.now()
+                .minusSeconds(120);
+
+        // Restore an event with an already expired lease.
+        OutboxEvent expiredEvent = OutboxEvent.restore(
+                eventId,
+                job.getId(),
+                "job.submitted",
+                "job.submitted",
+                "{}",
+                OutboxStatus.PENDING,
+                0,
+                createdAt,
+                null,
+                "publisher-A",
+                expiredAt,
+                oldToken
+        );
+
+        outboxRepository.save(expiredEvent);
+
+        // Act: another publisher requests an available event.
+        List<OutboxEvent> reserved =
+                outboxRepository.reservePending(
+                        "publisher-B",
+                        1,
+                        Duration.ofSeconds(30)
+                );
+
+        // Assert: publisher B recovered the expired event.
+        assertEquals(1, reserved.size());
+
+        OutboxEvent recovered = reserved.getFirst();
+
+        assertEquals(eventId, recovered.getId());
+        assertEquals(
+                OutboxStatus.PENDING,
+                recovered.getStatus()
+        );
+
+        assertEquals(
+                "publisher-B",
+                recovered.getLockedBy()
+        );
+
+        assertNotNull(recovered.getLeaseToken());
+        assertNotEquals(
+                oldToken,
+                recovered.getLeaseToken()
+        );
+
+        assertTrue(
+                recovered.getLockedUntil()
+                        .isAfter(Instant.now())
+        );
+
+        // Verify the new reservation is persisted.
+        OutboxEvent persisted = outboxRepository
+                .findById(eventId)
+                .orElseThrow();
+
+        assertEquals(
+                "publisher-B",
+                persisted.getLockedBy()
+        );
+
+        assertEquals(
+                recovered.getLeaseToken(),
+                persisted.getLeaseToken()
+        );
+
+        assertEquals(
+                recovered.getLockedUntil(),
+                persisted.getLockedUntil()
+        );
+
+        // The previous publisher cannot confirm using its old token.
+        assertThrows(
+                IllegalStateException.class,
+                () -> persisted.markPublished(
+                        oldToken,
+                        Instant.now()
+                )
+        );
+
+        assertEquals(
+                OutboxStatus.PENDING,
+                persisted.getStatus()
+        );
     }
 }
