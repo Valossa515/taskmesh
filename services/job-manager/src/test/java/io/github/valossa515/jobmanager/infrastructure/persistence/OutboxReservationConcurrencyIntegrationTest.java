@@ -13,6 +13,10 @@ import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.util.concurrent.ExecutionException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -35,6 +39,13 @@ class OutboxReservationConcurrencyIntegrationTest {
 
     @Autowired
     private IOutboxRepository outboxRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
 
     @Test
     @Timeout(20)
@@ -142,6 +153,144 @@ class OutboxReservationConcurrencyIntegrationTest {
 
         } finally {
             start.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+
+    @Test
+    @Timeout(20)
+    void shouldSkipLockedEventAndReserveNextAvailable()
+            throws Exception {
+
+        Job job = jobRepository.save(
+                Job.create("NO_OP", "{}")
+        );
+
+        OutboxEvent lockedEvent = OutboxEvent.create(
+                UUID.randomUUID(),
+                job.getId(),
+                "job.submitted",
+                "job.submitted",
+                "{}",
+                Instant.parse("1990-01-01T00:00:00Z")
+        );
+
+        OutboxEvent availableEvent = OutboxEvent.create(
+                UUID.randomUUID(),
+                job.getId(),
+                "job.submitted",
+                "job.submitted",
+                "{}",
+                Instant.parse("1990-01-01T00:00:01Z")
+        );
+
+        outboxRepository.save(lockedEvent);
+        outboxRepository.save(availableEvent);
+
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+
+        ExecutorService executor =
+                Executors.newFixedThreadPool(2);
+
+        TransactionTemplate transactionTemplate =
+                new TransactionTemplate(transactionManager);
+
+        try {
+            Future<?> lockingTransaction =
+                    executor.submit(() -> {
+                        transactionTemplate.executeWithoutResult(
+                                status -> {
+                                    UUID lockedId =
+                                            jdbcTemplate.queryForObject(
+                                                    """
+                                                    SELECT id
+                                                    FROM outbox_events
+                                                    WHERE id = ?
+                                                    FOR UPDATE
+                                                    """,
+                                                    UUID.class,
+                                                    lockedEvent.getId()
+                                            );
+
+                                    if (!lockedEvent.getId().equals(lockedId)) {
+                                        throw new IllegalStateException(
+                                                "Unexpected locked event"
+                                        );
+                                    }
+
+                                    lockAcquired.countDown();
+
+                                    try {
+                                        if (!releaseLock.await(
+                                                10,
+                                                TimeUnit.SECONDS
+                                        )) {
+                                            throw new IllegalStateException(
+                                                    "Lock release timed out"
+                                            );
+                                        }
+                                    } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
+                                        throw new IllegalStateException(
+                                                "Interrupted while holding lock",
+                                                e
+                                        );
+                                    }
+                                }
+                        );
+                    });
+
+            assertTrue(
+                    lockAcquired.await(5, TimeUnit.SECONDS),
+                    "Transaction A must acquire the row lock"
+            );
+
+            Future<List<OutboxEvent>> reservation =
+                    executor.submit(() ->
+                            outboxRepository.reservePending(
+                                    "publisher-B",
+                                    1,
+                                    Duration.ofSeconds(30)
+                            )
+                    );
+
+            // Must complete while transaction A still holds the lock.
+            List<OutboxEvent> reserved =
+                    reservation.get(5, TimeUnit.SECONDS);
+
+            assertEquals(1, reserved.size());
+
+            assertEquals(
+                    availableEvent.getId(),
+                    reserved.getFirst().getId()
+            );
+
+            assertEquals(
+                    "publisher-B",
+                    reserved.getFirst().getLockedBy()
+            );
+
+            assertNotNull(
+                    reserved.getFirst().getLeaseToken()
+            );
+
+            // Release transaction A only after checking B's result.
+            releaseLock.countDown();
+
+            // Propagate any failure from transaction A.
+            lockingTransaction.get(5, TimeUnit.SECONDS);
+
+            OutboxEvent untouched = outboxRepository
+                    .findById(lockedEvent.getId())
+                    .orElseThrow();
+
+            assertNull(untouched.getLeaseToken());
+            assertNull(untouched.getLockedBy());
+
+        } finally {
+            releaseLock.countDown();
             executor.shutdownNow();
         }
     }
