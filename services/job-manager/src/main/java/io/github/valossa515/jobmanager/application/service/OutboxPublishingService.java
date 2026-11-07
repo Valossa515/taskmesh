@@ -3,14 +3,17 @@ package io.github.valossa515.jobmanager.application.service;
 import io.github.valossa515.jobmanager.application.exception.EventPublicationException;
 import io.github.valossa515.jobmanager.application.port.IEventPublisher;
 import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 
 import io.github.valossa515.jobmanager.application.exception.EventPublicationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 
+@Service
 public class OutboxPublishingService {
 
     private final IOutboxRepository outboxRepository;
@@ -31,7 +34,7 @@ public class OutboxPublishingService {
         this.leaseDuration = leaseDuration;
     }
 
-
+    @Autowired
     public OutboxPublishingService(
             IOutboxRepository outboxRepository,
             IEventPublisher eventPublisher,
@@ -100,5 +103,4 @@ public class OutboxPublishingService {
 
         return publishedCount;
     }
-
 }
