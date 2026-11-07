@@ -8,6 +8,8 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.List;
@@ -164,10 +166,48 @@ public class OutboxRepositoryAdapter implements IOutboxRepository {
         );
     }
 
+
     @Override
-    public boolean markPublished(UUID eventId, UUID leaseToken) {
-        throw new UnsupportedOperationException(
-                "Conditional publication confirmation not implemented yet"
+    @Transactional
+    public boolean markPublished(
+            UUID eventId,
+            UUID leaseToken
+    ) {
+        if (eventId == null) {
+            throw new IllegalArgumentException(
+                    "Event ID must not be null"
+            );
+        }
+
+        if (leaseToken == null) {
+            throw new IllegalArgumentException(
+                    "Lease token must not be null"
+            );
+        }
+
+        String sql = """
+        UPDATE outbox_events
+        SET
+            status = 'PUBLISHED',
+            published_at = statement_timestamp(),
+            locked_by = NULL,
+            locked_until = NULL,
+            lease_token = NULL
+        WHERE id = :eventId
+          AND status = 'PENDING'
+          AND lease_token = :leaseToken
+          AND locked_until > statement_timestamp()
+        """;
+
+        var parameters = new MapSqlParameterSource()
+                .addValue("eventId", eventId)
+                .addValue("leaseToken", leaseToken);
+
+        int updatedRows = jdbcTemplate.update(
+                sql,
+                parameters
         );
+
+        return updatedRows == 1;
     }
 }
