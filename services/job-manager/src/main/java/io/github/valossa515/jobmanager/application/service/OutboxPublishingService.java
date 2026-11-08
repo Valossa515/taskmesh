@@ -1,34 +1,71 @@
+
 package io.github.valossa515.jobmanager.application.service;
 
 import io.github.valossa515.jobmanager.application.exception.EventPublicationException;
 import io.github.valossa515.jobmanager.application.port.IEventPublisher;
+import io.github.valossa515.jobmanager.application.port.IOutboxMetrics;
 import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 
-import io.github.valossa515.jobmanager.application.exception.EventPublicationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.Objects;
 
 @Service
 public class OutboxPublishingService {
 
+    private static final Logger log =
+            LoggerFactory.getLogger(OutboxPublishingService.class);
+
     private final IOutboxRepository outboxRepository;
     private final IEventPublisher eventPublisher;
+    private final IOutboxMetrics outboxMetrics;
 
     private final String publisherId;
     private final int batchSize;
     private final Duration leaseDuration;
 
-    private static final Logger log =
-            LoggerFactory.getLogger(OutboxPublishingService.class);
+    public OutboxPublishingService(
+            IOutboxRepository outboxRepository,
+            IEventPublisher eventPublisher,
+            IOutboxMetrics outboxMetrics,
+            String publisherId,
+            int batchSize,
+            Duration leaseDuration
+    ) {
+        this.outboxRepository =
+                Objects.requireNonNull(outboxRepository);
 
-    public OutboxPublishingService(IOutboxRepository outboxRepository, IEventPublisher eventPublisher, String publisherId, int batchSize, Duration leaseDuration) {
-        this.outboxRepository = outboxRepository;
-        this.eventPublisher = eventPublisher;
+        this.eventPublisher =
+                Objects.requireNonNull(eventPublisher);
+
+        this.outboxMetrics =
+                Objects.requireNonNull(outboxMetrics);
+
+        if (publisherId == null || publisherId.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Publisher ID must not be blank"
+            );
+        }
+
+        if (batchSize <= 0) {
+            throw new IllegalArgumentException(
+                    "Batch size must be positive"
+            );
+        }
+
+        if (leaseDuration == null
+                || leaseDuration.isNegative()
+                || leaseDuration.isZero()) {
+            throw new IllegalArgumentException(
+                    "Lease duration must be positive"
+            );
+        }
+
         this.publisherId = publisherId;
         this.batchSize = batchSize;
         this.leaseDuration = leaseDuration;
@@ -38,6 +75,7 @@ public class OutboxPublishingService {
     public OutboxPublishingService(
             IOutboxRepository outboxRepository,
             IEventPublisher eventPublisher,
+            IOutboxMetrics outboxMetrics,
             @Value("${taskmesh.publisher.id:job-manager-1}")
             String publisherId,
             @Value("${taskmesh.publisher.batch-size:10}")
@@ -45,74 +83,82 @@ public class OutboxPublishingService {
             @Value("${taskmesh.publisher.lease-seconds:30}")
             long leaseSeconds
     ) {
-        if (publisherId == null || publisherId.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Publisher ID must not be blank"
-            );
-        }
-
-        if (batchSize <= 0 || leaseSeconds <= 0) {
-            throw new IllegalArgumentException(
-                    "Invalid publisher configuration"
-            );
-        }
-
-        this.outboxRepository = outboxRepository;
-        this.eventPublisher = eventPublisher;
-        this.publisherId = publisherId;
-        this.batchSize = batchSize;
-        this.leaseDuration = Duration.ofSeconds(leaseSeconds);
+        this(
+                outboxRepository,
+                eventPublisher,
+                outboxMetrics,
+                publisherId,
+                batchSize,
+                Duration.ofSeconds(leaseSeconds)
+        );
     }
 
-
-
     public int publishBatch() {
-        int publishedCount = 0;
+        long startedAt = System.nanoTime();
 
-        for (int processed = 0; processed < batchSize; processed++) {
+        try {
+            int publishedCount = 0;
 
-            var events = outboxRepository.reservePending(
-                    publisherId,
-                    1,
-                    leaseDuration
-            );
+            for (int processed = 0;
+                 processed < batchSize;
+                 processed++) {
 
-            if (events.isEmpty()) {
-                break;
-            }
-
-            var event = events.getFirst();
-
-            try {
-                eventPublisher.publish(event);
-
-                boolean confirmed = outboxRepository.markPublished(
-                        event.getId(),
-                        event.getLeaseToken()
+                var events = outboxRepository.reservePending(
+                        publisherId,
+                        1,
+                        leaseDuration
                 );
 
-                if (confirmed) {
-                    publishedCount++;
-                } else {
-                    log.warn(
-                            "Publication confirmation rejected for event {}",
-                            event.getId()
-                    );
-                }
-
-            } catch (EventPublicationException exception) {
-                log.warn(
-                        "Failed to publish outbox event {}: {}",
-                        event.getId(),
-                        exception.getMessage()
-                );
-
-                if (Thread.currentThread().isInterrupted()) {
+                if (events.isEmpty()) {
                     break;
                 }
-            }
-        }
 
-        return publishedCount;
+                var event = events.getFirst();
+
+                try {
+                    eventPublisher.publish(event);
+
+                    boolean confirmed =
+                            outboxRepository.markPublished(
+                                    event.getId(),
+                                    event.getLeaseToken()
+                            );
+
+                    if (confirmed) {
+                        publishedCount++;
+                        outboxMetrics.recordPublished();
+                    } else {
+                        outboxMetrics.recordLeaseLost();
+
+                        log.warn(
+                                "Publication confirmation rejected for event {}",
+                                event.getId()
+                        );
+                    }
+
+                } catch (EventPublicationException exception) {
+                    outboxMetrics.recordFailed();
+
+                    log.warn(
+                            "Failed to publish outbox event {}: {}",
+                            event.getId(),
+                            exception.getMessage()
+                    );
+
+                    if (Thread.currentThread().isInterrupted()) {
+                        break;
+                    }
+                }
+            }
+
+            return publishedCount;
+
+        } finally {
+            outboxMetrics.recordBatchDuration(
+                    Duration.ofNanos(
+                            System.nanoTime() - startedAt
+                    )
+            );
+        }
     }
 }

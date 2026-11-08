@@ -5,6 +5,7 @@ import io.github.valossa515.jobmanager.application.exception.EventPublicationExc
 import io.github.valossa515.jobmanager.application.port.IEventPublisher;
 import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
 import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
+import io.github.valossa515.jobmanager.application.port.IOutboxMetrics;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,9 @@ class OutboxPublishingServiceTest {
     @Mock
     private IEventPublisher eventPublisher;
 
+    @Mock
+    private IOutboxMetrics outboxMetrics;
+
     private OutboxPublishingService service;
 
     @BeforeEach
@@ -42,6 +46,7 @@ class OutboxPublishingServiceTest {
         service = new OutboxPublishingService(
                 outboxRepository,
                 eventPublisher,
+                outboxMetrics,
                 PUBLISHER_ID,
                 BATCH_SIZE,
                 30
@@ -119,6 +124,8 @@ class OutboxPublishingServiceTest {
         );
 
         order.verifyNoMoreInteractions();
+
+        verify(outboxMetrics, times(2)).recordPublished();
     }
 
     @Test
@@ -156,6 +163,8 @@ class OutboxPublishingServiceTest {
         verify(outboxRepository).markPublished(
                 second.getId(), second.getLeaseToken()
         );
+
+        verify(outboxMetrics).recordFailed();
     }
 
     @Test
@@ -220,6 +229,8 @@ class OutboxPublishingServiceTest {
         verify(eventPublisher).publish(event);
         verify(outboxRepository, never())
                 .markPublished(any(), any());
+
+        verify(outboxMetrics).recordFailed();
     }
 
     @Test
@@ -231,6 +242,7 @@ class OutboxPublishingServiceTest {
                 new OutboxPublishingService(
                         outboxRepository,
                         eventPublisher,
+                        outboxMetrics,
                         PUBLISHER_ID,
                         2,
                         LEASE_DURATION
