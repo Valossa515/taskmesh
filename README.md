@@ -4,40 +4,24 @@
 
 TaskMesh is a portfolio project for designing, building, and operating a distributed job-processing platform. It explores domain modeling, Clean Architecture, CQRS/Mediator, relational persistence, messaging, concurrency, resilience, and observability.
 
-> **Current status:** Milestone 01 — Foundation. The Java `job-manager` supports creating and persisting jobs through an HTTP API. Distributed execution by workers is **not implemented yet**.
+**Milestone 02 — Distributed Job Processing is complete.** The Job Manager accepts jobs and dispatches them to RabbitMQ. Jobs remain `PENDING` after dispatch. Milestone 03 will introduce Java and .NET workers.
 
 ## Architecture
 
 ```text
-HTTP client
-    |
-    v
-POST /api/v1/jobs
-    |
-    v
-JobController (presentation)
-    |
-    +-- HTTP DTO / mapper / Problem Details
-    |
-    v
-Spring Courier (CQRS dispatcher)
-    |
-    v
-CreateJobCommand -> CreateJobHandler (application)
-    |
-    v
-IJobRepository (application port)
-    |
-    v
-JobRepositoryAdapter -> Spring Data JPA (infrastructure)
-    |
-    v
-PostgreSQL
+POST /api/v1/jobs → Spring Courier → CreateJobHandler
+                                         |
+                              PostgreSQL transaction
+                                jobs + outbox_events
+                                               |
+                                      scheduled relay
+                                               |
+                                     RabbitMQ exchange
+                                               |
+                                     taskmesh.jobs.pending
 ```
 
-The `Job` domain model is independent of Spring and JPA. `JobJpaEntity` represents the database row, and `JobMapper` converts between persistence and domain representations. Flyway owns schema changes; Hibernate validates the schema rather than generating it.
-
-Spring Courier handles **in-process** command dispatch. Future RabbitMQ messages will be **cross-service integration contracts**, independent of Spring Courier and usable by Java and .NET workers.
+Spring Courier dispatches commands inside the Job Manager. RabbitMQ carries the versioned JSON contract across service boundaries. See the [dispatch architecture and validation record](docs/architecture/job-dispatch.md) for the publisher flow and operational checks.
 
 ## Technology stack
 
@@ -46,32 +30,23 @@ Spring Courier handles **in-process** command dispatch. Future RabbitMQ messages
 | Java service | Java 25, Spring Boot 4.1.2 | `job-manager` |
 | Build | Gradle | Java service build and tests |
 | CQRS / Mediator | [Spring Courier 15.0.0](https://github.com/Valossa515/spring-courier) | `CreateJobCommand` / handler dispatch |
-| Database | PostgreSQL 17 | Job persistence |
-| Migrations | Flyway | `V1__create_jobs_table.sql` |
+| Database | PostgreSQL 17 | Jobs and outbox events |
+| Migrations | Flyway | Jobs, outbox events and publisher leases |
 | ORM | Spring Data JPA / Hibernate | Persistence adapter |
 | Validation / errors | Jakarta Validation, Spring MVC `ProblemDetail` | HTTP input validation and RFC 9457 errors |
 | Testing | JUnit, Mockito, Spring MockMvc, Testcontainers | Unit and integration tests |
-| Messaging | RabbitMQ 4 | Infrastructure available; publishing/consuming jobs planned |
+| Messaging | RabbitMQ 4 | Confirmed publication to the shared job queue |
 | Workers | Java and .NET 10 | Planned |
 | UI | Angular | Planned |
-| Observability | OpenTelemetry, Prometheus, Grafana | Planned |
+| Observability | Micrometer, Prometheus, Grafana | Outbox publisher metrics and dashboard |
 
 ## Monorepo layout
 
-```text
-taskmesh/
-├── services/
-│   ├── job-manager/                 # Implemented Spring Boot service
-│   ├── worker-java/                 # Planned
-│   └── worker-dotnet/               # Planned
-├── contracts/                      # Planned language-neutral event schemas
-├── infrastructure/
-│   └── docker-compose.yml          # PostgreSQL and RabbitMQ
-├── docs/
-│   ├── architecture/                # Architecture documentation (in progress)
-│   └── adr/                         # Architecture decision records (planned)
-└── README.md
-```
+- [Job Manager](services/job-manager/) — API, domain model, persistence and publisher.
+- [Contracts](contracts/) — language-neutral schemas, examples and compatibility tests.
+- [Infrastructure](infrastructure/) — local Compose services and monitoring configuration.
+- [Architecture decisions](docs/adr/) — service boundaries, HTTP errors, queue topology and delivery guarantees.
+- [Roadmap](docs/roadmap.md) — completed milestones and the planned worker scope.
 
 Inside `services/job-manager`, the source is organized around `domain`, `application`, `infrastructure`, and `presentation` responsibilities. The creation command/handler currently live under `io.github.valossa515.jobmanager.job.create`.
 
@@ -79,7 +54,7 @@ Inside `services/job-manager`, the source is organized around `domain`, `applica
 
 - **JDK 25** available to Gradle (the project uses a Java toolchain).
 - **Docker** with Docker Compose and support for Testcontainers.
-- A terminal; examples below use **PowerShell** on Windows.
+- A terminal; examples below use **PowerShell 7.1+** on Windows.
 - The project's Gradle Wrapper (`gradlew.bat`); a global Gradle installation is not required.
 
 ## Run locally
@@ -89,6 +64,8 @@ Inside `services/job-manager`, the source is organized around `domain`, `applica
 From the **repository root**:
 
 ```powershell
+# Set the local Grafana admin password in this shell before running Compose.
+$env:GRAFANA_ADMIN_PASSWORD = Read-Host 'Local Grafana admin password' -MaskInput
 docker compose -f infrastructure/docker-compose.yml up -d
 docker compose -f infrastructure/docker-compose.yml ps
 ```
@@ -100,8 +77,10 @@ The local development configuration exposes:
 | PostgreSQL | `127.0.0.1:5433` | Database: `taskmesh`; user: `taskmesh`; password: `taskmesh_dev` |
 | RabbitMQ (AMQP) | `localhost:5672` | User: `taskmesh`; password: `taskmesh_dev` |
 | RabbitMQ Management | <http://localhost:15672> | Same RabbitMQ credentials |
+| Prometheus | <http://localhost:9090> | Local metrics explorer |
+| Grafana | <http://localhost:3000/d/taskmesh-outbox> | `admin` and the configured Grafana password |
 
-> The PostgreSQL container listens internally on `5432`; its **host** port is `5433` to avoid a local `5432` connection conflict encountered during development. Check your `infrastructure/docker-compose.yml` and `application.yml` if your checkout differs. These credentials are for **local development only**.
+> The PostgreSQL container listens internally on `5432`; its **host** port is `5433` to avoid a local `5432` connection conflict encountered during development. Check your `infrastructure/docker-compose.yml` and `application.yaml` if your checkout differs. These credentials are for **local development only**.
 
 ### 2. Start the job-manager
 
@@ -109,8 +88,12 @@ From the repository root:
 
 ```powershell
 cd services/job-manager
+# Enable automatic dispatch for this run (disabled by default).
+$env:TASKMESH_PUBLISHER_SCHEDULING_ENABLED = "true"
 .\gradlew.bat bootRun
 ```
+
+After stopping the service, run `Remove-Item Env:TASKMESH_PUBLISHER_SCHEDULING_ENABLED` in the same shell to restore the default for subsequent launches.
 
 The API runs at <http://localhost:8080> by default. The configured database URL for local development is `jdbc:postgresql://127.0.0.1:5433/taskmesh`. The application connects to PostgreSQL and applies Flyway migrations on startup.
 
@@ -230,31 +213,11 @@ From `services/job-manager`:
 
 Integration tests use a shared test configuration (`IntegrationTestConfig`) to provision PostgreSQL through **Testcontainers** and apply Flyway migrations. Docker must be running, but the local Compose PostgreSQL service does **not** need to be started for these tests.
 
-Verified project checkpoint: **30 tests passing** on November 4, 2026. This is a test-result checkpoint, not a claim of 100% coverage.
+The [Milestone 02 validation record](docs/architecture/job-dispatch.md#validation-checkpoint) covers the Java test results, CI run and operational smoke test.
 
 ## Milestones
 
-| Milestone | Scope | Status |
-| --- | --- | --- |
-| 01 — Foundation | Monorepo, domain state machine, PostgreSQL/Flyway, JPA, Spring Courier, create-job API, tests | Implemented; documentation and final review in progress |
-| 02 — Distributed processing | RabbitMQ job events, language-neutral contracts, Java/.NET workers | Planned |
-| 03 — Reliability | Retry policies, idempotency, outbox, concurrency control, failure recovery | Planned |
-| 04 — Observability and operations | OpenTelemetry, metrics, dashboards, operational tooling | Planned |
-| 05 — User interface | Angular administration / job monitoring UI | Planned |
-
-The milestone scope may evolve as requirements are validated. Development proceeds incrementally: design, implement, test, document, and only then expand scope.
-
-## Architecture decisions and next steps
-
-- **Clean Architecture:** business invariants belong to the pure Java `Job` domain model; external frameworks stay in outer layers.
-- **CQRS / Mediator:** Spring Courier dispatches in-process commands through typed handlers; it is **not** the RabbitMQ transport.
-- **Persistence:** Flyway controls schema evolution, while the application uses an abstract repository port and an infrastructure adapter.
-- **HTTP errors:** Problem Details offers a consistent, machine-readable error format.
-- **Integration testing:** Testcontainers avoids reliance on a manually provisioned database.
-
-These decisions should be formalized as ADRs in `docs/adr/`; ADR files are not assumed to exist yet.
-
-**Immediate next steps:** finish the Foundation documentation and manual smoke test, then design versioned job-submission/completion event schemas before implementing distributed workers. RabbitMQ is running locally but **no worker currently consumes jobs**.
+The [roadmap](docs/roadmap.md) tracks Milestones 01–02 and defines the scope and acceptance criteria for **Milestone 03 — Distributed Workers**.
 
 ## License
 

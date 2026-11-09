@@ -8,9 +8,7 @@
 
 ## Context
 
-TaskMesh currently creates Jobs through `POST /api/v1/jobs` and persists them in PostgreSQL with an initial `PENDING` status. The platform needs to dispatch work asynchronously to independently deployed Java and .NET workers without coupling the messaging contract to either language.
-
-The repository already includes RabbitMQ in Docker Compose and a sample `contracts/examples/job-submitted.json`. The sample is **not yet a validated schema**, and publishing/consuming is **not implemented**. The existing Spring Courier library handles **in-process command dispatch only**; RabbitMQ provides cross-process communication.
+When this decision was made, the Job Manager could persist jobs and the repository contained a sample message. The open question was how to dispatch work asynchronously to independently deployed Java and .NET workers using one language-neutral contract.
 
 We must decide whether both worker implementations receive jobs from one queue or each implementation receives jobs through separate queues.
 
@@ -26,34 +24,9 @@ Initial logical topology:
 | Routing key | `job.submitted` | Identifies a submitted job event |
 | Queue | `taskmesh.jobs.pending` | Durable queue for executable Jobs |
 | Binding | `taskmesh.jobs` → `taskmesh.jobs.pending` | Binding key `job.submitted` |
-| Consumers | `worker-java`, `worker-dotnet` | Independently deployed consumers of the **same queue** |
+| Consumers | `worker-java`, `worker-dotnet` | Planned competing consumers of the **same queue** |
 
-Illustrative flow:
-
-```text
-HTTP POST /api/v1/jobs
-        |
-        v
-job-manager  --> PostgreSQL (Job: PENDING)
-        |
-        | Job + OutboxEvent committed atomically
-        v
-PostgreSQL outbox_events
-        |
-        | scheduled publisher (future implementation)
-        v
-RabbitMQ topic exchange: taskmesh.jobs
-        |
-        | binding: job.submitted
-        v
-Shared queue: taskmesh.jobs.pending
-        |                    |
-        +--------------------+
-        |                    |
-        v                    v
-  worker-java          worker-dotnet
-   (consumer)           (consumer)
-```
+The [dispatch architecture](../architecture/job-dispatch.md) describes the implemented producer path. The consumers in the topology are planned for Milestone 03.
 
 Workers **compete** for deliveries: a given delivery is assigned to one consumer at a time, rather than broadcast to both technologies. RabbitMQ can redeliver unacknowledged messages, so a given Job may be processed more than once unless the application prevents duplicate effects.
 
@@ -61,9 +34,7 @@ Workers **compete** for deliveries: a given delivery is assigned to one consumer
 
 ## Message contract boundary
 
-The transport format will be language-neutral JSON, with explicit `eventId`, `eventType`, `schemaVersion`, `occurredAt`, and `data` fields. The `data` section identifies the Job (`jobId`, `jobType`) and carries its JSON `payload`.
-
-A formal JSON Schema will be introduced under `contracts/schemas/`, and both Java and .NET implementations must validate or test compatibility against it. The existing example also contains `priority` and `maxAttempts`; these fields do **not** imply that priority scheduling or retries are implemented. Their behavior must be specified before being treated as operational guarantees.
+The [job.submitted v1.0 schema](../../contracts/schemas/job-submitted.schema.json) defines the envelope and job data. Both worker implementations must pass compatibility tests against it. Priority scheduling and execution retry limits require separate semantics.
 
 `jobId` represents the business work item and `eventId` identifies an emitted message/event. They serve different deduplication purposes.
 
@@ -79,18 +50,13 @@ A formal JSON Schema will be introduced under `contracts/schemas/`, and both Jav
 
 ## Transactional consistency — mandatory Transactional Outbox
 
-**Decision:** implement the **Transactional Outbox from the first publishing implementation**, not as a later migration. Direct publication from `CreateJobHandler` or an HTTP controller is **not** part of the accepted design.
+Commit the job and its submission event in the same PostgreSQL transaction. Publishing directly from the handler would allow a broker send to survive a database rollback, or a committed job to lose its dispatch if the process stopped before sending.
 
-On job creation, a single PostgreSQL transaction commits both:
+Use short reservations with `FOR UPDATE SKIP LOCKED` and expiring leases. Concurrent relays can claim different rows and release database locks before waiting on RabbitMQ. A fresh token per reservation fences the final update, even if a publisher restarts with the same name. Lease expiry permits recovery after a crash and delays the next attempt after a failed send.
 
-1. The `jobs` row representing a newly created `PENDING` Job.
-2. An `outbox_events` row containing a stable event ID, event type, schema version, serialized payload, creation timestamp, and delivery state.
+Require a correlated positive publisher confirm and check for a mandatory return. RabbitMQ can acknowledge an unroutable publication, so the return check matters. Only a publisher holding the current, unexpired token can then record `PUBLISHED`.
 
-A separate outbox relay reads pending events and publishes persistent messages to RabbitMQ. A publish is not treated as safely delivered solely because a send method returned: the relay must use publisher confirms and appropriate routing feedback. It marks the outbox row as published **only after positive broker confirmation and routing verification**. An absent or negative confirmation leaves the row eligible for retry, with operational bounds and diagnostics.
-
-A crash after RabbitMQ accepts the message but before the database records publication can cause a duplicate publish. Consequently the design provides **at-least-once event delivery under stated operational assumptions**, not exactly-once delivery. Downstream consumers must deduplicate logical work and side effects. The outbox itself also requires safe claiming/locking when multiple relay instances operate concurrently.
-
-**Implementation boundary:** the initial outbox relay can be a simple scheduled poller; CDC, complex retry frameworks, and an HA broker are not prerequisites for the first incremental slice. No guarantee of end-to-end reliable processing is claimed until relay failure/restart and consumer acknowledgment tests are in place.
+This supports at-least-once dispatch while the relay runs and PostgreSQL, the broker and routing recover. Losing the confirm or crashing after routing and before the database update can publish the same event again. Its stable event ID lets consumers recognize repeats. Polling also adds dispatch latency and database work. Consumer acknowledgements and idempotent execution belong to the worker milestone.
 
 ## Failure handling and future extensions
 
@@ -146,16 +112,8 @@ A crash after RabbitMQ accepts the message but before the database records publi
 - [x] Target **at-least-once** delivery, explicitly allowing retries and duplicate deliveries, not exactly-once effects.
 - [x] Keep `job-manager` as the authoritative owner of Job state; workers report outcomes rather than accessing its tables.
 - [x] Require **Transactional Outbox from the first publishing implementation**. No direct publish in the Job creation transaction.
-- [x] Treat `priority` and `maxAttempts` from the sample as *not implemented*; do not imply operational support.
+- [x] Keep priority and execution retry limits outside the v1.0 submission contract.
 
-## Incremental implementation plan
+## Implementation status
 
-Proceed one validated slice at a time; implementation is not authorized merely by this ADR's acceptance.
-
-1. **Contract:** define `contracts/schemas/job-submitted.schema.json` (JSON Schema Draft 2020-12) and align `contracts/examples/job-submitted.json`. Require `eventId`, `eventType = job.submitted`, `schemaVersion = 1.0`, `occurredAt`, and `data.jobId`, `data.jobType`, `data.payload` (JSON object). Do not include `priority` or `maxAttempts` in the v1 contract until their semantics are specified. Validate valid/invalid examples automatically.
-2. **Outbox persistence:** add Flyway V2 for `outbox_events`, persistence model, port/adapter, and a transaction-scoped create-Job-and-outbox operation. Verify rollback atomicity via PostgreSQL Testcontainers.
-3. **RabbitMQ topology:** declare exchange, queue, and binding. Test declarations and routing against a containerized RabbitMQ instance.
-4. **Outbox relay:** publish pending events with publisher confirms, persistent messages, controlled claiming, and retries; test failure/recovery and duplicate-publication windows.
-5. **Workers and outcomes:** implement a common demonstration Job type in Java and .NET, manual acknowledgement, idempotency, and the first outcome-report contract; test that one delivery is handled by one competing consumer at a time, with redelivery after failures.
-
-**Next validation gate:** approve the minimal `job.submitted` v1 envelope and tests before editing application code or creating database migrations.
+Milestone 02 delivered the schema, PostgreSQL outbox, queue topology and scheduled relay. See the [validation record](../architecture/job-dispatch.md#validation-checkpoint) for the evidence and the [roadmap](../roadmap.md) for the worker acceptance criteria.
