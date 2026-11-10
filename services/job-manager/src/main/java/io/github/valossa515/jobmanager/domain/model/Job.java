@@ -81,10 +81,23 @@ public class Job {
         return new Job(id, type, payload, status, createdAt, startedAt, completedAt, failureReason);
     }
 
+
     public void start() {
+        start(Instant.now());
+    }
+
+    public void start(Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
         requireStatus(JobStatus.PENDING);
+
+        if (now.isBefore(createdAt)) {
+            throw new IllegalArgumentException(
+                    "startedAt must not be before createdAt"
+            );
+        }
+
         this.status = JobStatus.RUNNING;
-        this.startedAt = Instant.now();
+        this.startedAt = now;
     }
 
     public void complete() {
@@ -94,14 +107,27 @@ public class Job {
     }
 
     public void fail(String reason) {
+        fail(reason, Instant.now());
+    }
+
+    public void fail(String reason, Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
         requireStatus(JobStatus.RUNNING);
 
-        if(reason == null || reason.isBlank()) {
-            throw new IllegalArgumentException("Failure reason must not be null or blank");
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Failure reason must not be blank"
+            );
+        }
+
+        if (now.isBefore(startedAt)) {
+            throw new IllegalArgumentException(
+                    "completedAt must not be before startedAt"
+            );
         }
 
         this.status = JobStatus.FAILED;
-        this.completedAt = Instant.now();
+        this.completedAt = now;
         this.failureReason = reason;
     }
 

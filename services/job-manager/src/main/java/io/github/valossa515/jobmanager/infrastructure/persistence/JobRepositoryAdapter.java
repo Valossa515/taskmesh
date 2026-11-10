@@ -28,4 +28,10 @@ public class JobRepositoryAdapter implements IJobRepository {
         return repository.findById(id)
                 .map(JobMapper::toDomain);
     }
+
+    @Override
+    public Optional<Job> findByIdForUpdate(UUID id) {
+        return repository.findByIdForUpdate(id)
+                .map(JobMapper::toDomain);
+    }
 }

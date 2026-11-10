@@ -3,7 +3,6 @@ package io.github.valossa515.jobmanager.application.job.create;
 import io.github.valossa515.jobmanager.application.port.IJobRepository;
 import io.github.valossa515.jobmanager.domain.model.Job;
 import io.github.valossa515.jobmanager.domain.model.JobStatus;
-import io.github.valossa515.jobmanager.job.create.CreateJobCommand;
 import io.github.valossa515.jobmanager.support.IntegrationTestConfig;
 import io.github.valossa515.spring_courier.core.Courier;
 import io.github.valossa515.spring_courier.core.support.Response;

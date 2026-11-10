@@ -6,10 +6,6 @@ import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
 import io.github.valossa515.jobmanager.domain.model.Job;
 import io.github.valossa515.jobmanager.domain.model.JobStatus;
 import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
-import io.github.valossa515.jobmanager.job.create.CreateJobCommand;
-import io.github.valossa515.jobmanager.job.create.CreateJobHandler;
-import io.github.valossa515.jobmanager.job.create.JobSubmittedEventFactory;
-
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

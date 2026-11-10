@@ -1,7 +1,7 @@
 package io.github.valossa515.jobmanager.presentation.rest.mapper;
 
 import io.github.valossa515.jobmanager.domain.model.Job;
-import io.github.valossa515.jobmanager.job.create.CreateJobCommand;
+import io.github.valossa515.jobmanager.application.job.create.CreateJobCommand;
 import io.github.valossa515.jobmanager.presentation.rest.dto.CreateJobRequest;
 import io.github.valossa515.jobmanager.presentation.rest.dto.CreateJobResponse;
 import org.springframework.stereotype.Component;

@@ -1,4 +1,4 @@
-package io.github.valossa515.jobmanager.job.create;
+package io.github.valossa515.jobmanager.application.job.create;
 
 import io.github.valossa515.jobmanager.application.port.IJobRepository;
 import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
