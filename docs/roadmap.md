@@ -10,7 +10,7 @@
 
 **Input and ownership.** Both workers will compete for deliveries on `taskmesh.jobs.pending` and support the same deterministic `NO_OP` workload. Use the existing [submission schema](../contracts/schemas/job-submitted.schema.json) and [example](../contracts/examples/job-submitted.json) as compatibility fixtures. The Job Manager owns job state. Workers will report outcomes through a versioned interface.
 
-**Decisions before consumption.** Specify how the manager accepts started, completed and failed reports, including correlation by `eventId` and `jobId`, duplicate reports, and recovery from a worker crash after a job starts. The current API accepts arbitrary nonblank job types. Define admission or routing for unsupported types and a bounded disposition for invalid messages before attaching consumers to a populated queue.
+**03.1 — Execution protocol (proposed, awaiting review).** [ADR-004](adr/ADR-004-worker-execution-protocol.md) defines the worker commands, execution ownership and expiry, `NO_OP` admission, and delivery settlement. Review the crash, redelivery and quarantine cases in its validation gate before starting implementation.
 
 **Acceptance criteria**
 
