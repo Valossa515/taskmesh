@@ -1,6 +1,6 @@
 # ADR-004: Worker execution protocol for NO_OP jobs
 
-- **Status:** Proposed for maintainer review
+- **Status:** Accepted
 - **Date:** 2026-11-10
 - **Scope:** Milestone 03, increment 03.1. Protocol for the Job Manager and the Java and .NET consumers of `taskmesh.jobs.pending`.
 
