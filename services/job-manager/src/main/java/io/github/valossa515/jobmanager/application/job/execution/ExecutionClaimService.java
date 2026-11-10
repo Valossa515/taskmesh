@@ -1,8 +1,15 @@
 
 package io.github.valossa515.jobmanager.application.job.execution;
 
-import io.github.valossa515.jobmanager.application.port.*;
-import io.github.valossa515.jobmanager.domain.model.*;
+import io.github.valossa515.jobmanager.application.port.IDatabaseClock;
+import io.github.valossa515.jobmanager.application.port.IJobExecutionRepository;
+import io.github.valossa515.jobmanager.application.port.IJobRepository;
+import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
+import io.github.valossa515.jobmanager.domain.model.Job;
+import io.github.valossa515.jobmanager.domain.model.JobExecution;
+import io.github.valossa515.jobmanager.domain.model.JobExecutionStatus;
+import io.github.valossa515.jobmanager.domain.model.JobStatus;
+import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,9 +51,9 @@ public class ExecutionClaimService {
             String workerId,
             String workerInstanceId
     ) {
-        Objects.requireNonNull(jobId);
-        Objects.requireNonNull(eventId);
-        Objects.requireNonNull(claimId);
+        Objects.requireNonNull(jobId, "jobId is required");
+        Objects.requireNonNull(eventId, "eventId is required");
+        Objects.requireNonNull(claimId, "claimId is required");
 
         if (workerId == null || workerId.isBlank()
                 || workerInstanceId == null
@@ -56,8 +63,7 @@ public class ExecutionClaimService {
             );
         }
 
-        // This lock serializes all execution decisions
-        // for the same logical job.
+        // Serialize execution decisions for the same Job.
         Job job = jobs.findByIdForUpdate(jobId)
                 .orElseThrow(() ->
                         new NoSuchElementException(
@@ -65,38 +71,42 @@ public class ExecutionClaimService {
                         )
                 );
 
+        // Validate the submission event.
         OutboxEvent event = events.findById(eventId)
-                .orElseThrow(() ->
-                        new IllegalArgumentException(
-                                "Submission event not found"
-                        )
+                .orElseThrow(
+                        SubmissionMismatchException::new
                 );
 
         if (!event.getAggregateId().equals(jobId)
-                || !"job.submitted".equals(
-                event.getEventType())) {
-            throw new IllegalArgumentException(
-                    "Submission does not match job"
-            );
+                || !"job.submitted".equals(event.getEventType())) {
+            throw new SubmissionMismatchException();
         }
 
+        // Only NO_OP is supported in Milestone 03.
         if (!"NO_OP".equals(job.getType())) {
-            throw new IllegalArgumentException(
-                    "Unsupported job type"
-            );
+            throw new UnsupportedJobTypeException();
         }
 
+        // Use PostgreSQL time after acquiring the lock.
         Instant now = clock.now();
 
         return switch (job.getStatus()) {
             case PENDING -> grant(
-                    job, eventId, claimId,
-                    workerId, workerInstanceId, now
+                    job,
+                    eventId,
+                    claimId,
+                    workerId,
+                    workerInstanceId,
+                    now
             );
 
             case RUNNING -> handleRunning(
-                    job, eventId, claimId,
-                    workerId, workerInstanceId, now
+                    job,
+                    eventId,
+                    claimId,
+                    workerId,
+                    workerInstanceId,
+                    now
             );
 
             case COMPLETED, FAILED ->
@@ -124,6 +134,7 @@ public class ExecutionClaimService {
 
         job.start(now);
 
+        // Both writes belong to the same transaction.
         jobs.save(job);
         executions.save(execution);
 
@@ -153,6 +164,7 @@ public class ExecutionClaimService {
             );
         }
 
+        // Expire the execution when its lease is no longer valid.
         if (!now.isBefore(execution.getExpiresAt())) {
             execution.expire(now);
 
@@ -167,6 +179,7 @@ public class ExecutionClaimService {
             return StartResult.terminal(job);
         }
 
+        // Idempotent retry by the original worker instance.
         boolean sameClaim =
                 execution.getEventId().equals(eventId)
                         && execution.getClaimId().equals(claimId)
@@ -211,6 +224,22 @@ public class ExecutionClaimService {
 
         public ExecutionAlreadyClaimedException() {
             super("Job already has an active execution");
+        }
+    }
+
+    public static class SubmissionMismatchException
+            extends IllegalStateException {
+
+        public SubmissionMismatchException() {
+            super("Submission does not match job");
+        }
+    }
+
+    public static class UnsupportedJobTypeException
+            extends IllegalStateException {
+
+        public UnsupportedJobTypeException() {
+            super("Unsupported job type");
         }
     }
 }

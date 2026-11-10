@@ -194,7 +194,7 @@ class ExecutionClaimServiceIntegrationTest {
         Fixture second = createFixture();
 
         assertThrows(
-                IllegalArgumentException.class,
+                ExecutionClaimService.SubmissionMismatchException.class,
                 () -> claimService.start(
                         first.jobId(),
                         second.eventId(),

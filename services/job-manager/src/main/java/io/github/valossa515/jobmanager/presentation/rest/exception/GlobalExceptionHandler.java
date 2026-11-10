@@ -1,5 +1,6 @@
 package io.github.valossa515.jobmanager.presentation.rest.exception;
 
+import io.github.valossa515.jobmanager.application.job.execution.ExecutionClaimService;
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.HttpStatus;
@@ -115,5 +116,72 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(status)
                 .body(problem);
+    }
+
+
+    @ExceptionHandler(
+            ExecutionClaimService.ExecutionAlreadyClaimedException.class
+    )
+    public ResponseEntity<ProblemDetail> handleExecutionActive(
+            ExecutionClaimService.ExecutionAlreadyClaimedException exception,
+            HttpServletRequest request
+    ) {
+        var response = buildProblem(
+                HttpStatus.CONFLICT,
+                "Execution Active",
+                exception.getMessage(),
+                "execution-active",
+                request
+        );
+
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .header("Retry-After", "5")
+                .body(response.getBody());
+    }
+
+    @ExceptionHandler(
+            ExecutionClaimService.SubmissionMismatchException.class
+    )
+    public ResponseEntity<ProblemDetail> handleSubmissionMismatch(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildProblem(
+                HttpStatus.CONFLICT,
+                "Submission Mismatch",
+                exception.getMessage(),
+                "submission-mismatch",
+                request
+        );
+    }
+
+    @ExceptionHandler(
+            ExecutionClaimService.UnsupportedJobTypeException.class
+    )
+    public ResponseEntity<ProblemDetail> handleUnsupportedJobType(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildProblem(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                "Unsupported Job Type",
+                exception.getMessage(),
+                "unsupported-job-type",
+                request
+        );
+    }
+
+    @ExceptionHandler(java.util.NoSuchElementException.class)
+    public ResponseEntity<ProblemDetail> handleNotFound(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildProblem(
+                HttpStatus.NOT_FOUND,
+                "Job Not Found",
+                exception.getMessage(),
+                "job-not-found",
+                request
+        );
     }
 }

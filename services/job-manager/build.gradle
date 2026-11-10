@@ -39,6 +39,8 @@ dependencies {
 	testImplementation 'org.testcontainers:testcontainers-postgresql'
 	testImplementation 'org.testcontainers:testcontainers-rabbitmq'
 	implementation 'io.github.valossa515:spring-courier:15.0.0'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	testImplementation 'org.springframework.security:spring-security-test'
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 }
 
