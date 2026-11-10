@@ -100,10 +100,23 @@ public class Job {
         this.startedAt = now;
     }
 
+
     public void complete() {
+        complete(Instant.now());
+    }
+
+    public void complete(Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
         requireStatus(JobStatus.RUNNING);
+
+        if (now.isBefore(startedAt)) {
+            throw new IllegalArgumentException(
+                    "completedAt must not be before startedAt"
+            );
+        }
+
         this.status = JobStatus.COMPLETED;
-        this.completedAt = Instant.now();
+        this.completedAt = now;
     }
 
     public void fail(String reason) {

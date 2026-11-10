@@ -1,7 +1,5 @@
-package io.github.valossa515.jobmanager.job.create;
+package io.github.valossa515.jobmanager.application.job.create;
 
-import io.github.valossa515.jobmanager.application.job.create.CreateJobCommand;
-import io.github.valossa515.jobmanager.application.job.create.CreateJobHandler;
 import io.github.valossa515.jobmanager.domain.model.Job;
 import io.github.valossa515.jobmanager.support.IntegrationTestConfig;
 import org.junit.jupiter.api.Test;
