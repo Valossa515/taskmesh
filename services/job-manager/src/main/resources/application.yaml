@@ -47,6 +47,9 @@ taskmesh:
   security:
     java-password: ${WORKER_JAVA_PASSWORD:}
     dotnet-password: ${WORKER_DOTNET_PASSWORD:}
+    worker-instance-registration:
+      enabled: false
+      signing-key-base64: ${WORKER_INSTANCE_JWT_KEY:}
 
 server:
   port: 8080

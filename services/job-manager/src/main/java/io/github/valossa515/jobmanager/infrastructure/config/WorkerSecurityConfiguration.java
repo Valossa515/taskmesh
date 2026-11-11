@@ -15,6 +15,7 @@ import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.ArrayList;
 
@@ -22,6 +23,33 @@ import static org.springframework.security.config.Customizer.withDefaults;
 
 @Configuration(proxyBeanMethods = false)
 public class WorkerSecurityConfiguration {
+
+    @Bean
+    @Order(1)
+    @ConditionalOnProperty(
+            prefix = "taskmesh.security.worker-instance-registration",
+            name = "enabled",
+            havingValue = "true"
+    )
+    SecurityFilterChain workerRegistrationRoutes(
+            HttpSecurity http
+    ) throws Exception {
+        return http
+                .securityMatcher(
+                        "/api/v1/worker-instances/register"
+                )
+                .authorizeHttpRequests(auth -> auth
+                        .anyRequest().hasRole("WORKER")
+                )
+                .httpBasic(withDefaults())
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(
+                                SessionCreationPolicy.STATELESS
+                        )
+                )
+                .build();
+    }
 
     @Bean
     @Order(1)
