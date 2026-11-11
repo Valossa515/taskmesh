@@ -31,3 +31,13 @@ spring:
           enabled: false
       direct:
         auto-startup: false
+
+taskmesh:
+  job-manager:
+    base-url: ${JOB_MANAGER_BASE_URL:http://127.0.0.1:8080}
+    registration:
+      username: ${WORKER_REGISTRATION_USERNAME:worker-java-local}
+      password: ${WORKER_REGISTRATION_PASSWORD:}
+
+  worker:
+    registration-on-startup: ${WORKER_REGISTER_ON_STARTUP:false}
