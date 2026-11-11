@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: worker-java
+  main:
+    web-application-type: none
+    keep-alive: true
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: taskmesh
+    password: ${RABBITMQ_PASSWORD:taskmesh_dev}
+    # Topology remains externally provisioned; foundation startup is offline.
+    dynamic: false
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+      retry:
+        enabled: false
+    listener:
+      type: simple
+      simple:
+        # Enable only after registration, validation and settlement are implemented.
+        auto-startup: false
+        acknowledge-mode: manual
+        prefetch: 1
+        concurrency: 1
+        max-concurrency: 1
+        default-requeue-rejected: false
+        retry:
+          enabled: false
+      direct:
+        auto-startup: false

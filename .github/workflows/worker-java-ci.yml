@@ -1,0 +1,47 @@
+name: Java Worker CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Worker foundation (Java 25)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/worker-java
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: gradle
+          cache-dependency-path: |
+            services/worker-java/*.gradle
+            services/worker-java/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Build and test foundation
+        run: bash ./gradlew clean test bootJar --no-daemon
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-java-test-reports
+          path: services/worker-java/build/reports/tests/test/
+          if-no-files-found: ignore
