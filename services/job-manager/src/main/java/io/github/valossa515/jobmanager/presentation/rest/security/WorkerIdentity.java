@@ -3,6 +3,10 @@ package io.github.valossa515.jobmanager.presentation.rest.security;
 
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+
+import java.util.UUID;
 
 public record WorkerIdentity(
         String workerId,
@@ -11,29 +15,41 @@ public record WorkerIdentity(
     public static WorkerIdentity from(
             Authentication authentication
     ) {
-        if (authentication == null
+        if (!(authentication instanceof JwtAuthenticationToken token)
                 || !authentication.isAuthenticated()) {
             throw new AccessDeniedException(
-                    "Worker authentication required"
+                    "Worker JWT authentication required"
             );
         }
 
-        return switch (authentication.getName()) {
-            case "worker-java-local" ->
-                    new WorkerIdentity(
-                            "worker-java",
-                            "java-local"
-                    );
+        Jwt jwt = token.getToken();
 
-            case "worker-dotnet-local" ->
-                    new WorkerIdentity(
-                            "worker-dotnet",
-                            "dotnet-local"
-                    );
+        String workerId = jwt.getSubject();
+        String instanceId =
+                jwt.getClaimAsString("worker_instance_id");
 
-            default -> throw new AccessDeniedException(
-                    "Unknown worker identity"
+        if (!"worker-java".equals(workerId)
+                && !"worker-dotnet".equals(workerId)) {
+            throw new AccessDeniedException(
+                    "Invalid worker identity"
             );
-        };
+        }
+
+        try {
+            if (instanceId == null
+                    || !UUID.fromString(instanceId)
+                    .toString().equals(instanceId)) {
+                throw new IllegalArgumentException();
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new AccessDeniedException(
+                    "Invalid worker instance identity"
+            );
+        }
+
+        return new WorkerIdentity(
+                workerId,
+                instanceId
+        );
     }
 }

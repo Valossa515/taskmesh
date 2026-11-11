@@ -2,6 +2,7 @@
 package io.github.valossa515.jobmanager.infrastructure.config;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -15,7 +16,6 @@ import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.ArrayList;
 
@@ -24,6 +24,7 @@ import static org.springframework.security.config.Customizer.withDefaults;
 @Configuration(proxyBeanMethods = false)
 public class WorkerSecurityConfiguration {
 
+    // Bootstrap: Basic authentication is allowed here only.
     @Bean
     @Order(1)
     @ConditionalOnProperty(
@@ -51,19 +52,28 @@ public class WorkerSecurityConfiguration {
                 .build();
     }
 
+    // Execution API: Bearer JWT only.
     @Bean
-    @Order(1)
-    SecurityFilterChain workerRoutes(HttpSecurity http)
-            throws Exception {
-
+    @Order(2)
+    @ConditionalOnProperty(
+            prefix = "taskmesh.security.worker-instance-registration",
+            name = "enabled",
+            havingValue = "true"
+    )
+    SecurityFilterChain workerExecutionRoutes(
+            HttpSecurity http
+    ) throws Exception {
         return http
                 .securityMatcher(
                         "/api/v1/jobs/*/executions/**"
                 )
                 .authorizeHttpRequests(auth -> auth
-                        .anyRequest().hasRole("WORKER")
+                        .anyRequest()
+                        .hasAuthority("SCOPE_worker.execute")
                 )
-                .httpBasic(withDefaults())
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(withDefaults())
+                )
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(
@@ -73,11 +83,35 @@ public class WorkerSecurityConfiguration {
                 .build();
     }
 
+    // Fail closed when instance authentication is disabled.
     @Bean
     @Order(2)
-    SecurityFilterChain existingRoutes(HttpSecurity http)
-            throws Exception {
+    @ConditionalOnProperty(
+            prefix = "taskmesh.security.worker-instance-registration",
+            name = "enabled",
+            havingValue = "false",
+            matchIfMissing = true
+    )
+    SecurityFilterChain disabledWorkerExecutionRoutes(
+            HttpSecurity http
+    ) throws Exception {
+        return http
+                .securityMatcher(
+                        "/api/v1/jobs/*/executions/**"
+                )
+                .authorizeHttpRequests(auth -> auth
+                        .anyRequest().denyAll()
+                )
+                .csrf(csrf -> csrf.disable())
+                .build();
+    }
 
+    // Preserve the existing API behavior.
+    @Bean
+    @Order(3)
+    SecurityFilterChain existingRoutes(
+            HttpSecurity http
+    ) throws Exception {
         return http
                 .authorizeHttpRequests(auth -> auth
                         .anyRequest().permitAll()
