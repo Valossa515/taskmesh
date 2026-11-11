@@ -1,23 +1,25 @@
+
 package io.github.valossa515.jobmanager.application.job.create;
 
 import io.github.valossa515.jobmanager.domain.model.Job;
 import io.github.valossa515.jobmanager.support.IntegrationTestConfig;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
 @Import(IntegrationTestConfig.class)
-public class CreateJobCommitIntegrationTest {
+class CreateJobCommitIntegrationTest {
 
     @Autowired
     private CreateJobHandler handler;
@@ -30,10 +32,8 @@ public class CreateJobCommitIntegrationTest {
 
     @Test
     void shouldPersistJobAndOutboxEventTogether() {
-        String jobType = "COMMIT_" + UUID.randomUUID();
-
         Job job = handler.handle(
-                new CreateJobCommand(jobType, "{}")
+                new CreateJobCommand("NO_OP", "{}")
         );
 
         Integer jobCount = jdbcTemplate.queryForObject(
@@ -61,6 +61,11 @@ public class CreateJobCommitIntegrationTest {
         assertEquals(
                 job.getId().toString(),
                 event.get("data").get("jobId").asString()
+        );
+
+        assertEquals(
+                "NO_OP",
+                event.get("data").get("jobType").asString()
         );
 
         UUID eventId = UUID.fromString(

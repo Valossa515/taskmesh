@@ -2,6 +2,7 @@ package io.github.valossa515.jobmanager.presentation.rest.exception;
 
 import io.github.valossa515.jobmanager.application.job.execution.ExecutionClaimService;
 import io.github.valossa515.jobmanager.application.job.execution.ExecutionOutcomeService;
+import io.github.valossa515.jobmanager.application.job.create.JobTypeAdmission;
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.HttpStatus;
@@ -156,9 +157,11 @@ public class GlobalExceptionHandler {
         );
     }
 
-    @ExceptionHandler(
-            ExecutionClaimService.UnsupportedJobTypeException.class
-    )
+
+    @ExceptionHandler({
+            ExecutionClaimService.UnsupportedJobTypeException.class,
+            JobTypeAdmission.UnsupportedJobTypeException.class
+    })
     public ResponseEntity<ProblemDetail> handleUnsupportedJobType(
             RuntimeException exception,
             HttpServletRequest request

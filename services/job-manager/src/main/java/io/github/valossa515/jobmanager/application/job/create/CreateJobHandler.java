@@ -1,3 +1,4 @@
+
 package io.github.valossa515.jobmanager.application.job.create;
 
 import io.github.valossa515.jobmanager.application.port.IJobRepository;
@@ -5,6 +6,7 @@ import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
 import io.github.valossa515.jobmanager.domain.model.Job;
 import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
 import io.github.valossa515.spring_courier.core.interfaces.CommandHandler;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,10 @@ public class CreateJobHandler
     @Override
     @Transactional
     public Job handle(CreateJobCommand command) {
+
+        // Admission must happen before any database write.
+        JobTypeAdmission.requireSupported(command.type());
+
         Job job = Job.create(
                 command.type(),
                 command.payload()
@@ -36,7 +42,8 @@ public class CreateJobHandler
 
         Job savedJob = jobRepository.save(job);
 
-        OutboxEvent event = jobSubmittedEventFactory.create(savedJob);
+        OutboxEvent event =
+                jobSubmittedEventFactory.create(savedJob);
 
         outboxRepository.save(event);
 

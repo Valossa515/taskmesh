@@ -1,3 +1,4 @@
+
 package io.github.valossa515.jobmanager.application.job.create;
 
 import io.github.valossa515.jobmanager.application.port.IJobRepository;
@@ -6,6 +7,7 @@ import io.github.valossa515.jobmanager.domain.model.JobStatus;
 import io.github.valossa515.jobmanager.support.IntegrationTestConfig;
 import io.github.valossa515.spring_courier.core.Courier;
 import io.github.valossa515.spring_courier.core.support.Response;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,7 +21,8 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest
 @Import(IntegrationTestConfig.class)
 @Transactional
-public class CreateJobCourierIntegrationTest {
+class CreateJobCourierIntegrationTest {
+
     @Autowired
     private Courier courier;
 
@@ -28,16 +31,13 @@ public class CreateJobCourierIntegrationTest {
 
     @Test
     void shouldDispatchCreateJobCommand() {
-        // Arrange
         CreateJobCommand command = new CreateJobCommand(
-                "REPORT_GENERATION",
-                "{\"reportId\":\"report-123\"}"
+                "NO_OP",
+                "{}"
         );
 
-        // Act
         Response<Job> response = courier.send(command);
 
-        // Assert: Courier
         assertTrue(
                 response.isSuccess(),
                 () -> "Courier failed: " + response.getError()
@@ -50,7 +50,7 @@ public class CreateJobCourierIntegrationTest {
         assertAll(
                 () -> assertNotNull(createdJob.getId()),
                 () -> assertEquals(
-                        "REPORT_GENERATION",
+                        "NO_OP",
                         createdJob.getType()
                 ),
                 () -> assertEquals(
@@ -59,7 +59,6 @@ public class CreateJobCourierIntegrationTest {
                 )
         );
 
-        // Assert: Persistence
         UUID jobId = createdJob.getId();
 
         Job persistedJob = jobRepository.findById(jobId)

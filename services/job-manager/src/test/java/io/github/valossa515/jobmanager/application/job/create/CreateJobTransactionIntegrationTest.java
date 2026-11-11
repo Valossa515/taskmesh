@@ -34,7 +34,11 @@ class CreateJobTransactionIntegrationTest {
 
     @Test
     void shouldRollbackJobWhenOutboxPersistenceFails() {
-        String jobType = "ROLLBACK_" + UUID.randomUUID();
+        String marker = UUID.randomUUID().toString();
+
+        String payload = """
+                {"rollbackMarker":"%s"}
+                """.formatted(marker);
 
         when(outboxRepository.save(any(OutboxEvent.class)))
                 .thenThrow(new IllegalStateException(
@@ -49,17 +53,27 @@ class CreateJobTransactionIntegrationTest {
         assertThrows(
                 IllegalStateException.class,
                 () -> handler.handle(
-                        new CreateJobCommand(jobType, "{}")
+                        new CreateJobCommand(
+                                "NO_OP",
+                                payload
+                        )
                 )
         );
 
         Integer persistedJobs = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM jobs WHERE type = ?",
+                """
+                SELECT COUNT(*)
+                FROM jobs
+                WHERE type = 'NO_OP'
+                  AND payload ->> 'rollbackMarker' = ?
+                """,
                 Integer.class,
-                jobType
+                marker
         );
 
         assertEquals(0, persistedJobs);
-        verify(outboxRepository).save(any(OutboxEvent.class));
+
+        verify(outboxRepository)
+                .save(any(OutboxEvent.class));
     }
 }

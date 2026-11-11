@@ -6,6 +6,7 @@ import io.github.valossa515.jobmanager.application.port.IOutboxRepository;
 import io.github.valossa515.jobmanager.domain.model.Job;
 import io.github.valossa515.jobmanager.domain.model.JobStatus;
 import io.github.valossa515.jobmanager.domain.model.OutboxEvent;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -43,7 +44,7 @@ class CreateJobHandlerTest {
         );
 
         CreateJobCommand command = new CreateJobCommand(
-                "REPORT_GENERATION",
+                "NO_OP",
                 "{}"
         );
 
@@ -51,7 +52,7 @@ class CreateJobHandlerTest {
 
         assertNotNull(result);
         assertEquals(JobStatus.PENDING, result.getStatus());
-        assertEquals("REPORT_GENERATION", result.getType());
+        assertEquals("NO_OP", result.getType());
         assertEquals("{}", result.getPayload());
 
         verify(jobRepository, times(1)).save(any(Job.class));
@@ -86,6 +87,36 @@ class CreateJobHandlerTest {
 
         assertThrows(
                 IllegalArgumentException.class,
+                () -> handler.handle(command)
+        );
+
+        verifyNoInteractions(
+                jobRepository,
+                outboxRepository,
+                eventFactory
+        );
+    }
+
+    @Test
+    void shouldRejectUnsupportedTypeBeforePersistence() {
+        IJobRepository jobRepository = mock(IJobRepository.class);
+        IOutboxRepository outboxRepository = mock(IOutboxRepository.class);
+        JobSubmittedEventFactory eventFactory =
+                mock(JobSubmittedEventFactory.class);
+
+        CreateJobHandler handler = new CreateJobHandler(
+                jobRepository,
+                outboxRepository,
+                eventFactory
+        );
+
+        CreateJobCommand command = new CreateJobCommand(
+                "REPORT_GENERATION",
+                "{}"
+        );
+
+        assertThrows(
+                JobTypeAdmission.UnsupportedJobTypeException.class,
                 () -> handler.handle(command)
         );
 
