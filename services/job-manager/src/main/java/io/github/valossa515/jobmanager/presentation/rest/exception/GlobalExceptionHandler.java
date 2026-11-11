@@ -1,6 +1,7 @@
 package io.github.valossa515.jobmanager.presentation.rest.exception;
 
 import io.github.valossa515.jobmanager.application.job.execution.ExecutionClaimService;
+import io.github.valossa515.jobmanager.application.job.execution.ExecutionOutcomeService;
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.HttpStatus;
@@ -181,6 +182,39 @@ public class GlobalExceptionHandler {
                 "Job Not Found",
                 exception.getMessage(),
                 "job-not-found",
+                request
+        );
+    }
+
+
+    @ExceptionHandler(
+            ExecutionOutcomeService.ExecutionStaleException.class
+    )
+    public ResponseEntity<ProblemDetail> handleExecutionStale(
+            ExecutionOutcomeService.ExecutionStaleException exception,
+            HttpServletRequest request
+    ) {
+        return buildProblem(
+                HttpStatus.CONFLICT,
+                "Execution Stale",
+                exception.getMessage(),
+                "execution-stale",
+                request
+        );
+    }
+
+    @ExceptionHandler(
+            ExecutionOutcomeService.OutcomeConflictException.class
+    )
+    public ResponseEntity<ProblemDetail> handleOutcomeConflict(
+            ExecutionOutcomeService.OutcomeConflictException exception,
+            HttpServletRequest request
+    ) {
+        return buildProblem(
+                HttpStatus.CONFLICT,
+                "Outcome Conflict",
+                exception.getMessage(),
+                "outcome-conflict",
                 request
         );
     }
