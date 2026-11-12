@@ -3,6 +3,7 @@ package io.github.valossa515.workerjava.config;
 
 import io.github.valossa515.workerjava.registration.WorkerRegistrationClient;
 import io.github.valossa515.workerjava.registration.WorkerSessionManager;
+import io.github.valossa515.workerjava.execution.ExecutionApiClient;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +12,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -85,5 +87,22 @@ public class WorkerRegistrationConfiguration {
                     session.expiresAt()
             );
         };
+    }
+
+    @Bean
+    ExecutionApiClient executionApiClient(
+            HttpClient workerHttpClient,
+            JsonMapper jsonMapper,
+            WorkerSessionManager sessions,
+
+            @Value("${taskmesh.job-manager.base-url}")
+            String baseUrl
+    ) {
+        return new ExecutionApiClient(
+                workerHttpClient,
+                jsonMapper,
+                sessions,
+                URI.create(baseUrl)
+        );
     }
 }
