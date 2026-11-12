@@ -51,4 +51,15 @@ class ExecutionApiDisabledSecurityIntegrationTest {
                 )
                 .andExpect(status().isForbidden());
     }
+
+
+    @Test
+    void shouldBlockRefreshWhenWorkerAuthenticationIsDisabled()
+            throws Exception {
+
+        mockMvc.perform(
+                        post("/api/v1/worker-instances/refresh")
+                )
+                .andExpect(status().isForbidden());
+    }
 }

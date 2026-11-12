@@ -3,6 +3,7 @@ package io.github.valossa515.jobmanager.presentation.rest.exception;
 import io.github.valossa515.jobmanager.application.job.execution.ExecutionClaimService;
 import io.github.valossa515.jobmanager.application.job.execution.ExecutionOutcomeService;
 import io.github.valossa515.jobmanager.application.job.create.JobTypeAdmission;
+import io.github.valossa515.jobmanager.application.job.execution.WorkerInstanceRegistrationService;
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.http.HttpStatus;
@@ -218,6 +219,42 @@ public class GlobalExceptionHandler {
                 "Outcome Conflict",
                 exception.getMessage(),
                 "outcome-conflict",
+                request
+        );
+    }
+
+
+    @ExceptionHandler(
+            WorkerInstanceRegistrationService
+                    .WorkerSessionExpiredException.class
+    )
+    public ResponseEntity<ProblemDetail> handleWorkerSessionExpired(
+            WorkerInstanceRegistrationService
+                    .WorkerSessionExpiredException exception,
+            HttpServletRequest request
+    ) {
+        return buildProblem(
+                HttpStatus.CONFLICT,
+                "Worker Session Expired",
+                exception.getMessage(),
+                "worker-session-expired",
+                request
+        );
+    }
+
+
+    @ExceptionHandler(
+            org.springframework.security.access.AccessDeniedException.class
+    )
+    public ResponseEntity<ProblemDetail> handleAccessDenied(
+            org.springframework.security.access.AccessDeniedException exception,
+            HttpServletRequest request
+    ) {
+        return buildProblem(
+                HttpStatus.FORBIDDEN,
+                "Access Denied",
+                "Worker access is forbidden",
+                "worker-access-denied",
                 request
         );
     }

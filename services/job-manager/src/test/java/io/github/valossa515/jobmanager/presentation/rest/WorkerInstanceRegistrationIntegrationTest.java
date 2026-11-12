@@ -28,6 +28,9 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import org.springframework.http.HttpHeaders;
+import java.time.Instant;
+
 @SpringBootTest(properties = {
         "taskmesh.security.worker-instance-registration.enabled=true",
         "taskmesh.security.worker-instance-registration.signing-key-base64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
@@ -46,11 +49,17 @@ class WorkerInstanceRegistrationIntegrationTest {
     private static final String TEST_KEY =
             "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 
+    private static final String REFRESH_URL =
+            "/api/v1/worker-instances/refresh";
+
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
     private JsonMapper jsonMapper;
+
+    @Autowired
+    private WorkerInstanceRegistrationService registrations;
 
     private JsonNode register(
             String username,
@@ -220,6 +229,138 @@ class WorkerInstanceRegistrationIntegrationTest {
         assertThrows(
                 JwtException.class,
                 () -> decoder().decode(tamperedToken)
+        );
+    }
+
+
+    @Test
+    void shouldRenewJwtKeepingTheSameWorkerIdentity()
+            throws Exception {
+
+        JsonNode original = register(
+                "worker-java-local",
+                "java-test-password"
+        );
+
+        String oldToken =
+                original.get("accessToken").asString();
+
+        String responseBody = mockMvc.perform(
+                        post(REFRESH_URL)
+                                .header(
+                                        HttpHeaders.AUTHORIZATION,
+                                        "Bearer " + oldToken
+                                )
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workerId")
+                        .value("worker-java"))
+                .andExpect(jsonPath("$.tokenType")
+                        .value("Bearer"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        JsonNode refreshed = jsonMapper.readTree(responseBody);
+
+        assertEquals(
+                original.get("workerInstanceId").asString(),
+                refreshed.get("workerInstanceId").asString()
+        );
+
+        String newToken =
+                refreshed.get("accessToken").asString();
+
+        assertNotEquals(oldToken, newToken);
+
+        Jwt oldJwt = decoder().decode(oldToken);
+        Jwt newJwt = decoder().decode(newToken);
+
+        assertEquals(
+                oldJwt.getSubject(),
+                newJwt.getSubject()
+        );
+
+        assertEquals(
+                oldJwt.getClaimAsString("worker_instance_id"),
+                newJwt.getClaimAsString("worker_instance_id")
+        );
+
+        assertEquals(
+                oldJwt.getClaimAsString("session_expires_at"),
+                newJwt.getClaimAsString("session_expires_at")
+        );
+
+        assertNotEquals(oldJwt.getId(), newJwt.getId());
+    }
+
+    @Test
+    void shouldRejectRefreshWithoutBearerToken()
+            throws Exception {
+
+        mockMvc.perform(post(REFRESH_URL))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldRejectBasicCredentialsOnRefresh()
+            throws Exception {
+
+        mockMvc.perform(
+                        post(REFRESH_URL)
+                                .with(httpBasic(
+                                        "worker-java-local",
+                                        "java-test-password"
+                                ))
+                )
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldRejectTamperedRefreshToken()
+            throws Exception {
+
+        JsonNode registration = register(
+                "worker-java-local",
+                "java-test-password"
+        );
+
+        String token =
+                registration.get("accessToken").asString();
+
+        String[] parts = token.split("\\.");
+
+        String signature = parts[2];
+
+        char replacement =
+                signature.charAt(0) == 'A' ? 'B' : 'A';
+
+        String tampered = parts[0]
+                + "." + parts[1]
+                + "." + replacement
+                + signature.substring(1);
+
+        mockMvc.perform(
+                        post(REFRESH_URL)
+                                .header(
+                                        HttpHeaders.AUTHORIZATION,
+                                        "Bearer " + tampered
+                                )
+                )
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void shouldRejectRenewalNearSessionDeadline() {
+
+        assertThrows(
+                WorkerInstanceRegistrationService
+                        .WorkerSessionExpiredException.class,
+                () -> registrations.refresh(
+                        "worker-java",
+                        UUID.randomUUID(),
+                        Instant.now().plusSeconds(30)
+                )
         );
     }
 }

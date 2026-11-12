@@ -220,4 +220,26 @@ class ExecutionJwtSecurityIntegrationTest {
         requestWithToken(token)
                 .andExpect(status().isUnauthorized());
     }
+
+
+    @Test
+    void shouldRejectRefreshWithoutExecutionScope()
+            throws Exception {
+
+        String token = signedToken(
+                WorkerInstanceRegistrationService.ISSUER,
+                WorkerInstanceRegistrationService.AUDIENCE,
+                UUID.randomUUID().toString(),
+                "worker.read"
+        );
+
+        mockMvc.perform(
+                        post("/api/v1/worker-instances/refresh")
+                                .header(
+                                        HttpHeaders.AUTHORIZATION,
+                                        "Bearer " + token
+                                )
+                )
+                .andExpect(status().isForbidden());
+    }
 }

@@ -65,7 +65,8 @@ public class WorkerSecurityConfiguration {
     ) throws Exception {
         return http
                 .securityMatcher(
-                        "/api/v1/jobs/*/executions/**"
+                        "/api/v1/jobs/*/executions/**",
+                        "/api/v1/worker-instances/refresh"
                 )
                 .authorizeHttpRequests(auth -> auth
                         .anyRequest()
@@ -97,7 +98,8 @@ public class WorkerSecurityConfiguration {
     ) throws Exception {
         return http
                 .securityMatcher(
-                        "/api/v1/jobs/*/executions/**"
+                        "/api/v1/jobs/*/executions/**",
+                        "/api/v1/worker-instances/refresh"
                 )
                 .authorizeHttpRequests(auth -> auth
                         .anyRequest().denyAll()
