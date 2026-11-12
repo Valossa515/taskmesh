@@ -20,10 +20,27 @@ repositories {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
     implementation 'org.springframework.boot:spring-boot-starter-json'
+    implementation 'com.networknt:json-schema-validator:3.0.9'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('processResources') {
+    from(rootProject.file('../../contracts/schemas')) {
+        include 'job-submitted.schema.json'
+        into 'contracts/schemas'
+    }
+}
+
+tasks.named('processTestResources') {
+    from(rootProject.file('../../contracts/examples')) {
+        include 'job-submitted.json'
+        into 'contracts/examples'
+    }
 }
 
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+
