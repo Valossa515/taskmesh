@@ -10,6 +10,7 @@ import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,7 +34,12 @@ class RabbitMqTopologyIntegrationTest {
     private TopicExchange jobsExchange;
 
     @Autowired
+    @Qualifier("pendingJobQueue")
     private Queue pendingJobsQueue;
+
+    @Autowired
+    @Qualifier("deadJobQueue")
+    private Queue deadJobsQueue;
 
     @Autowired
     private Binding jobSubmittedBinding;
@@ -114,6 +120,20 @@ class RabbitMqTopologyIntegrationTest {
                             && fields[2].equals("job.submitted");
                 }),
                 "Expected job.submitted binding on RabbitMQ"
+        );
+
+        assertEquals(
+                RabbitMqTopologyConfig.DEAD_QUEUE,
+                deadJobsQueue.getName()
+        );
+
+        assertTrue(deadJobsQueue.isDurable());
+
+        assertNotNull(
+                rabbitAdmin.getQueueInfo(
+                        RabbitMqTopologyConfig.DEAD_QUEUE
+                ),
+                "Dead Letter Queue must exist on RabbitMQ"
         );
     }
 

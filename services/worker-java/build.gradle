@@ -23,6 +23,9 @@ dependencies {
     implementation 'com.networknt:json-schema-validator:3.0.9'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-rabbitmq'
 }
 
 tasks.named('processResources') {

@@ -41,3 +41,5 @@ taskmesh:
 
   worker:
     registration-on-startup: ${WORKER_REGISTER_ON_STARTUP:false}
+    quarantine:
+      confirm-timeout-ms: ${DLQ_CONFIRM_TIMEOUT_MS:10000}
