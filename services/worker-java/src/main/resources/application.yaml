@@ -43,3 +43,6 @@ taskmesh:
     registration-on-startup: ${WORKER_REGISTER_ON_STARTUP:false}
     quarantine:
       confirm-timeout-ms: ${DLQ_CONFIRM_TIMEOUT_MS:10000}
+    renewal:
+      initial-delay-ms: ${WORKER_RENEWAL_INITIAL_DELAY_MS:60000}
+      check-interval-ms: ${WORKER_RENEWAL_CHECK_INTERVAL_MS:60000}

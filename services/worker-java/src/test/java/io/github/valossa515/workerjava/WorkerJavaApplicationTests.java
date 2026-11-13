@@ -16,6 +16,8 @@ import org.springframework.context.ApplicationContext;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.valossa515.workerjava.registration.WorkerTokenRenewalScheduler;
+
 @SpringBootTest
 class WorkerJavaApplicationTests {
 
@@ -77,5 +79,14 @@ class WorkerJavaApplicationTests {
         assertThat(connectionFactory.isPublisherConfirms()).isTrue();
         assertThat(connectionFactory.isPublisherReturns()).isTrue();
         assertThat(rabbit.getTemplate().getMandatory()).isTrue();
+    }
+
+    @Test
+    void shouldKeepRenewalSchedulerDisabledWithoutRegistration() {
+        assertThat(
+                context.getBeansOfType(
+                        WorkerTokenRenewalScheduler.class
+                )
+        ).isEmpty();
     }
 }

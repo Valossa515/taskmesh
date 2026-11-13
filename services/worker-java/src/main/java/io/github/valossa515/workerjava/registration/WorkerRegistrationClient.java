@@ -16,11 +16,15 @@ import java.util.Base64;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import tools.jackson.databind.JsonNode;
 
 public class WorkerRegistrationClient {
 
     private static final String REGISTRATION_PATH =
             "/api/v1/worker-instances/register";
+
+    private static final String REFRESH_PATH =
+            "/api/v1/worker-instances/refresh";
 
     private final HttpClient httpClient;
     private final JsonMapper jsonMapper;
@@ -198,6 +202,148 @@ public class WorkerRegistrationClient {
                 Throwable cause
         ) {
             super(message, cause);
+        }
+    }
+
+
+    public WorkerSession refresh(WorkerSession current) {
+        Objects.requireNonNull(
+                current,
+                "Current worker session is required"
+        );
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(registrationUri.resolve(REFRESH_PATH))
+                .timeout(Duration.ofSeconds(5))
+                .header(
+                        "Authorization",
+                        "Bearer " + current.accessToken()
+                )
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+
+        HttpResponse<String> response;
+
+        try {
+            response = httpClient.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString(
+                            StandardCharsets.UTF_8
+                    )
+            );
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+
+            throw new WorkerTokenRenewalException(
+                    WorkerTokenRenewalException.Kind.TRANSIENT,
+                    "Worker token renewal was interrupted",
+                    exception
+            );
+        } catch (IOException exception) {
+            throw new WorkerTokenRenewalException(
+                    WorkerTokenRenewalException.Kind.TRANSIENT,
+                    "Job Manager is unavailable during token renewal",
+                    exception
+            );
+        }
+
+        int status = response.statusCode();
+
+        if (status == 401 || status == 403) {
+            throw new WorkerTokenRenewalException(
+                    WorkerTokenRenewalException.Kind.REJECTED,
+                    "Worker token renewal was rejected"
+            );
+        }
+
+        if (status == 409) {
+            if (isSessionExpiredProblem(response.body())) {
+                throw new WorkerTokenRenewalException(
+                        WorkerTokenRenewalException.Kind.SESSION_EXPIRED,
+                        "Maximum worker session lifetime reached"
+                );
+            }
+
+            throw new WorkerTokenRenewalException(
+                    WorkerTokenRenewalException.Kind.PROTOCOL,
+                    "Unexpected renewal conflict"
+            );
+        }
+
+        if (status == 408
+                || status == 429
+                || status >= 500 && status <= 599) {
+            throw new WorkerTokenRenewalException(
+                    WorkerTokenRenewalException.Kind.TRANSIENT,
+                    "Token renewal is temporarily unavailable"
+            );
+        }
+
+        if (status != 200) {
+            throw new WorkerTokenRenewalException(
+                    WorkerTokenRenewalException.Kind.PROTOCOL,
+                    "Unexpected token renewal HTTP status: " + status
+            );
+        }
+
+        RegistrationResponse data;
+
+        try {
+            data = jsonMapper.readValue(
+                    response.body(),
+                    RegistrationResponse.class
+            );
+        } catch (Exception exception) {
+            throw new WorkerTokenRenewalException(
+                    WorkerTokenRenewalException.Kind.PROTOCOL,
+                    "Malformed token renewal response",
+                    exception
+            );
+        }
+
+        if (data == null
+                || !current.workerId().equals(data.workerId())
+                || !current.workerInstanceId().equals(
+                data.workerInstanceId()
+        )
+                || !"Bearer".equals(data.tokenType())
+                || data.accessToken() == null
+                || data.accessToken().isBlank()
+                || data.accessToken().equals(current.accessToken())
+                || data.expiresAt() == null
+                || !data.expiresAt().isAfter(
+                clock.instant().plusSeconds(90)
+        )) {
+            throw new WorkerTokenRenewalException(
+                    WorkerTokenRenewalException.Kind.PROTOCOL,
+                    "Invalid token renewal response or identity mismatch"
+            );
+        }
+
+        return new WorkerSession(
+                data.workerId(),
+                data.workerInstanceId(),
+                data.accessToken(),
+                data.expiresAt()
+        );
+    }
+
+    private boolean isSessionExpiredProblem(String body) {
+        try {
+            JsonNode problem = jsonMapper.readTree(body);
+
+            if (problem == null || !problem.isObject()) {
+                return false;
+            }
+
+            JsonNode type = problem.get("type");
+
+            return type != null
+                    && "urn:taskmesh:problem:worker-session-expired"
+                    .equals(type.asString());
+        } catch (Exception exception) {
+            return false;
         }
     }
 }

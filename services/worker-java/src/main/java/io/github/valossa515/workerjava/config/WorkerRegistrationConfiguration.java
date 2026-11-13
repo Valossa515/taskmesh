@@ -5,6 +5,7 @@ import io.github.valossa515.workerjava.registration.WorkerRegistrationClient;
 import io.github.valossa515.workerjava.registration.WorkerSessionManager;
 import io.github.valossa515.workerjava.execution.ExecutionApiClient;
 
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,6 +13,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 
 import tools.jackson.databind.json.JsonMapper;
@@ -22,6 +24,7 @@ import java.time.Clock;
 import java.time.Duration;
 
 @Configuration(proxyBeanMethods = false)
+@EnableScheduling
 public class WorkerRegistrationConfiguration {
 
     private static final Logger logger =
