@@ -46,3 +46,5 @@ taskmesh:
     renewal:
       initial-delay-ms: ${WORKER_RENEWAL_INITIAL_DELAY_MS:60000}
       check-interval-ms: ${WORKER_RENEWAL_CHECK_INTERVAL_MS:60000}
+    consumer:
+      enabled: ${WORKER_CONSUMER_ENABLED:false}

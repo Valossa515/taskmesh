@@ -17,6 +17,7 @@ import org.springframework.context.ApplicationContext;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.valossa515.workerjava.registration.WorkerTokenRenewalScheduler;
+import io.github.valossa515.workerjava.messaging.JobMessageListener;
 
 @SpringBootTest
 class WorkerJavaApplicationTests {
@@ -42,13 +43,35 @@ class WorkerJavaApplicationTests {
         assertThat(context.getBeansOfType(DataSource.class)).isEmpty();
     }
 
+
     @Test
-    void doesNotDeclareTopologyOrRegisterConsumers() {
-        assertThat(context.getBeansOfType(AmqpAdmin.class)).isEmpty();
-        assertThat(context.getBeansOfType(Declarable.class)).isEmpty();
-        assertThat(context.getBean(RabbitListenerEndpointRegistry.class)
-                .getListenerContainers()).isEmpty();
-        assertThat(rabbit.getListener().getDirect().isAutoStartup()).isFalse();
+    void doesNotDeclareTopologyOrStartConsumer() {
+        assertThat(
+                context.getBeansOfType(AmqpAdmin.class)
+        ).isEmpty();
+
+        assertThat(
+                context.getBeansOfType(Declarable.class)
+        ).isEmpty();
+
+        var registry = context.getBean(
+                RabbitListenerEndpointRegistry.class
+        );
+
+        assertThat(
+                registry.getListenerContainers()
+        ).hasSize(1);
+
+        var listener = registry.getListenerContainer(
+                JobMessageListener.LISTENER_ID
+        );
+
+        assertThat(listener).isNotNull();
+        assertThat(listener.isRunning()).isFalse();
+
+        assertThat(
+                rabbit.getListener().getSimple().isAutoStartup()
+        ).isFalse();
     }
 
     @Test
