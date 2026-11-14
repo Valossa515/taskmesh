@@ -17,6 +17,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import java.time.Duration;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -41,6 +45,8 @@ class JobDeliveryProcessorTest {
     private static final UUID EXECUTION_ID =
             UUID.randomUUID();
 
+    private final List<Duration> delays = new ArrayList<>();
+
     private ExecutionApiClient executionApi;
     private DeadLetterPublisher deadLetterPublisher;
     private JobDeliveryProcessor processor;
@@ -60,7 +66,8 @@ class JobDeliveryProcessorTest {
                 validator,
                 executionApi,
                 deadLetterPublisher,
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                delays::add
         );
 
         try (var stream = getClass().getResourceAsStream(
@@ -243,8 +250,9 @@ class JobDeliveryProcessorTest {
         verifyNoInteractions(executionApi);
     }
 
+
     @Test
-    void shouldDeferTransientStartFailure() {
+    void shouldQuarantineAfterTransientStartRetriesExhausted() {
         when(executionApi.start(
                 eq(JOB_ID),
                 eq(EVENT_ID),
@@ -257,17 +265,22 @@ class JobDeliveryProcessorTest {
                 )
         );
 
-        var exception = assertThrows(
-                JobProcessingDeferredException.class,
+        assertDoesNotThrow(
                 () -> processor.process(validMessage)
         );
 
-        assertEquals(
-                Recovery.RETRY_SAME_COMMAND,
-                exception.recovery()
+        verify(executionApi, times(4)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
         );
 
-        verifyNoInteractions(deadLetterPublisher);
+        verify(deadLetterPublisher).publish(
+                same(validMessage),
+                eq("START_TRANSIENT_RETRY_EXHAUSTED")
+        );
+
+        assertEquals(3, delays.size());
     }
 
     @Test
@@ -295,8 +308,9 @@ class JobDeliveryProcessorTest {
         );
     }
 
+
     @Test
-    void shouldWaitForAnotherActiveClaim() {
+    void shouldWaitAndQuarantineAfterActiveClaimExhaustion() {
         when(executionApi.start(
                 eq(JOB_ID),
                 eq(EVENT_ID),
@@ -309,24 +323,54 @@ class JobDeliveryProcessorTest {
                 )
         );
 
-        var exception = assertThrows(
-                JobProcessingDeferredException.class,
+        assertDoesNotThrow(
                 () -> processor.process(validMessage)
         );
 
-        assertEquals(
-                Recovery.WAIT_FOR_ACTIVE_CLAIM,
-                exception.recovery()
+        verify(executionApi, times(4)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
         );
 
-        verify(executionApi, never()).complete(
-                any(), any(), any()
+        assertEquals(3, delays.size());
+
+        assertTrue(
+                delays.stream().allMatch(
+                        delay -> delay.toMillis() >= 10_000
+                )
+        );
+
+        verify(deadLetterPublisher).publish(
+                same(validMessage),
+                eq("START_ACTIVE_CLAIM_RETRY_EXHAUSTED")
         );
     }
 
+
     @Test
-    void shouldReconcileStaleCompletion() {
-        startRunning();
+    void shouldReconcileStaleCompletionWithoutRepeatingOutcome() {
+        var running = new ExecutionApiClient.StartResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.RUNNING,
+                EXECUTION_ID,
+                NOW.plusSeconds(30),
+                null
+        );
+
+        var terminal = new ExecutionApiClient.StartResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.COMPLETED,
+                null,
+                null,
+                null
+        );
+
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenReturn(running, terminal);
 
         when(executionApi.complete(
                 JOB_ID,
@@ -340,18 +384,33 @@ class JobDeliveryProcessorTest {
                 )
         );
 
-        var exception = assertThrows(
-                JobProcessingDeferredException.class,
+        assertDoesNotThrow(
                 () -> processor.process(validMessage)
         );
 
+        var claimCaptor =
+                org.mockito.ArgumentCaptor.forClass(UUID.class);
+
+        verify(executionApi, times(2)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                claimCaptor.capture()
+        );
+
         assertEquals(
-                Recovery.RECONCILE_START,
-                exception.recovery()
+                claimCaptor.getAllValues().get(0),
+                claimCaptor.getAllValues().get(1)
+        );
+
+        verify(executionApi, times(1)).complete(
+                JOB_ID,
+                EVENT_ID,
+                EXECUTION_ID
         );
 
         verifyNoInteractions(deadLetterPublisher);
     }
+
 
     @Test
     void shouldQuarantineSubmissionMismatch() {
@@ -403,20 +462,343 @@ class JobDeliveryProcessorTest {
         );
     }
 
+
     @Test
-    void shouldReconcileExpiredExecutionLease() {
+    void shouldReconcileExpiredLeaseAsTerminalFailure() {
+        var expiredGrant = new ExecutionApiClient.StartResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.RUNNING,
+                EXECUTION_ID,
+                NOW.minusSeconds(1),
+                null
+        );
+
+        var failedJob = new ExecutionApiClient.StartResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.FAILED,
+                null,
+                null,
+                "EXECUTION_LEASE_EXPIRED"
+        );
+
         when(executionApi.start(
                 eq(JOB_ID),
                 eq(EVENT_ID),
                 any(UUID.class)
-        )).thenReturn(
-                new ExecutionApiClient.StartResult(
-                        JOB_ID,
-                        ExecutionApiClient.JobStatus.RUNNING,
-                        EXECUTION_ID,
-                        NOW.minusSeconds(1),
-                        null
+        )).thenReturn(expiredGrant, failedJob);
+
+        assertDoesNotThrow(
+                () -> processor.process(validMessage)
+        );
+
+        verify(executionApi, times(2)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        );
+
+        verify(executionApi, never()).complete(
+                any(), any(), any()
+        );
+
+        verifyNoInteractions(deadLetterPublisher);
+    }
+
+
+    @Test
+    void shouldRetryStartWithSameClaimId() {
+        var running = new ExecutionApiClient.StartResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.RUNNING,
+                EXECUTION_ID,
+                NOW.plusSeconds(30),
+                null
+        );
+
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenThrow(
+                failure(ExecutionFailureKind.TRANSIENT, 503, null)
+        ).thenReturn(running);
+
+        completeSuccessfully();
+
+        processor.process(validMessage);
+
+        var captor =
+                org.mockito.ArgumentCaptor.forClass(UUID.class);
+
+        verify(executionApi, times(2)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                captor.capture()
+        );
+
+        assertEquals(
+                captor.getAllValues().get(0),
+                captor.getAllValues().get(1)
+        );
+
+        verify(executionApi).complete(
+                JOB_ID,
+                EVENT_ID,
+                EXECUTION_ID
+        );
+
+        assertEquals(1, delays.size());
+        verifyNoInteractions(deadLetterPublisher);
+    }
+
+
+    @Test
+    void shouldRetryCompleteWithSameExecutionId() {
+        startRunning();
+
+        var success = new ExecutionApiClient.OutcomeResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.COMPLETED,
+                null
+        );
+
+        when(executionApi.complete(
+                JOB_ID,
+                EVENT_ID,
+                EXECUTION_ID
+        )).thenThrow(
+                failure(ExecutionFailureKind.TRANSIENT, 503, null)
+        ).thenReturn(success);
+
+        processor.process(validMessage);
+
+        verify(executionApi, times(1)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        );
+
+        verify(executionApi, times(2)).complete(
+                JOB_ID,
+                EVENT_ID,
+                EXECUTION_ID
+        );
+
+        assertEquals(1, delays.size());
+        verifyNoInteractions(deadLetterPublisher);
+    }
+
+
+    @Test
+    void shouldHonorRetryAfterInSeconds() {
+        var terminal = new ExecutionApiClient.StartResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.COMPLETED,
+                null,
+                null,
+                null
+        );
+
+        var throttled = new ExecutionApiException(
+                ExecutionFailureKind.TRANSIENT,
+                429,
+                null,
+                "12",
+                null
+        );
+
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenThrow(throttled).thenReturn(terminal);
+
+        processor.process(validMessage);
+
+        assertEquals(1, delays.size());
+        assertTrue(delays.get(0).toMillis() >= 12_000);
+
+        verify(executionApi, times(2)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        );
+    }
+
+
+    @Test
+    void shouldHonorRetryAfterHttpDate() {
+        String retryAfter = NOW.plusSeconds(17)
+                .atZone(ZoneOffset.UTC)
+                .format(DateTimeFormatter.RFC_1123_DATE_TIME);
+
+        var throttled = new ExecutionApiException(
+                ExecutionFailureKind.TRANSIENT,
+                429,
+                null,
+                retryAfter,
+                null
+        );
+
+        var terminal = new ExecutionApiClient.StartResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.COMPLETED,
+                null,
+                null,
+                null
+        );
+
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenThrow(throttled).thenReturn(terminal);
+
+        processor.process(validMessage);
+
+        assertEquals(1, delays.size());
+        assertTrue(delays.get(0).toMillis() >= 17_000);
+    }
+
+
+    @Test
+    void shouldPauseInsteadOfIgnoringLongRetryAfter() {
+        var throttled = new ExecutionApiException(
+                ExecutionFailureKind.TRANSIENT,
+                429,
+                null,
+                "120",
+                null
+        );
+
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenThrow(throttled);
+
+        var exception = assertThrows(
+                JobProcessingDeferredException.class,
+                () -> processor.process(validMessage)
+        );
+
+        assertEquals(
+                Recovery.PAUSE_INTAKE,
+                exception.recovery()
+        );
+
+        assertTrue(delays.isEmpty());
+        verifyNoInteractions(deadLetterPublisher);
+    }
+
+
+    @Test
+    void shouldEnforceEightHttpCallsAcrossBothCommands() {
+        var transientFailure = failure(
+                ExecutionFailureKind.TRANSIENT,
+                503,
+                null
+        );
+
+        var staleFailure = failure(
+                ExecutionFailureKind.STALE_EXECUTION,
+                409,
+                "urn:taskmesh:problem:execution-stale"
+        );
+
+        var running = new ExecutionApiClient.StartResult(
+                JOB_ID,
+                ExecutionApiClient.JobStatus.RUNNING,
+                EXECUTION_ID,
+                NOW.plusSeconds(30),
+                null
+        );
+
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenThrow(transientFailure)
+                .thenThrow(transientFailure)
+                .thenThrow(transientFailure)
+                .thenReturn(running);
+
+        when(executionApi.complete(
+                JOB_ID,
+                EVENT_ID,
+                EXECUTION_ID
+        )).thenThrow(transientFailure)
+                .thenThrow(transientFailure)
+                .thenThrow(transientFailure)
+                .thenThrow(staleFailure);
+
+        assertDoesNotThrow(
+                () -> processor.process(validMessage)
+        );
+
+        verify(executionApi, times(4)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        );
+
+        verify(executionApi, times(4)).complete(
+                JOB_ID,
+                EVENT_ID,
+                EXECUTION_ID
+        );
+
+        verify(deadLetterPublisher).publish(
+                same(validMessage),
+                eq(
+                        "COMPLETE_STALE_EXECUTION_HTTP_BUDGET_EXHAUSTED"
                 )
+        );
+    }
+
+
+    @Test
+    void shouldPropagateDlqFailureAfterRetryExhaustion() {
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenThrow(
+                failure(ExecutionFailureKind.TRANSIENT, 503, null)
+        );
+
+        doThrow(
+                new QuarantinePublicationException(
+                        QuarantinePublicationException
+                                .Failure.TIMEOUT,
+                        "Quarantine confirm timed out"
+                )
+        ).when(deadLetterPublisher).publish(
+                same(validMessage),
+                anyString()
+        );
+
+        assertThrows(
+                QuarantinePublicationException.class,
+                () -> processor.process(validMessage)
+        );
+
+        verify(executionApi, times(4)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        );
+    }
+
+
+    @Test
+    void shouldPauseImmediatelyOnProtocolFailure() {
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenThrow(
+                failure(ExecutionFailureKind.PROTOCOL, 200, null)
         );
 
         var exception = assertThrows(
@@ -425,12 +807,47 @@ class JobDeliveryProcessorTest {
         );
 
         assertEquals(
-                Recovery.RECONCILE_START,
+                Recovery.PAUSE_INTAKE,
                 exception.recovery()
         );
 
-        verify(executionApi, never()).complete(
-                any(), any(), any()
+        verify(executionApi, times(1)).start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
         );
+
+        verifyNoInteractions(deadLetterPublisher);
+    }
+
+
+    @Test
+    void shouldPauseOnOversizedNumericRetryAfter() {
+        var throttled = new ExecutionApiException(
+                ExecutionFailureKind.TRANSIENT,
+                429,
+                null,
+                "999999999999999999999999999",
+                null
+        );
+
+        when(executionApi.start(
+                eq(JOB_ID),
+                eq(EVENT_ID),
+                any(UUID.class)
+        )).thenThrow(throttled);
+
+        var exception = assertThrows(
+                JobProcessingDeferredException.class,
+                () -> processor.process(validMessage)
+        );
+
+        assertEquals(
+                Recovery.PAUSE_INTAKE,
+                exception.recovery()
+        );
+
+        assertTrue(delays.isEmpty());
+        verifyNoInteractions(deadLetterPublisher);
     }
 }
