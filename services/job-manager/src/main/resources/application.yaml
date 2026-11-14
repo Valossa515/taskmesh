@@ -1,5 +1,7 @@
 
 spring:
+  config:
+    import: "optional:file:./.env[.properties]"
   application:
     name: job-manager
 
@@ -34,21 +36,21 @@ taskmesh:
     lease-seconds: 30
     lease-safety-margin-seconds: 5
     scheduling:
-      enabled: false
+      enabled:  ${JOB_MANAGER_PUBLISHER_ENABLED:false}
       fixed-delay-ms: 5000
       initial-delay-ms: 5000
   execution:
     expiration:
       batch-size: 100
       scheduling:
-        enabled: false
+        enabled:  ${JOB_MANAGER_EXPIRATION_SWEEP_ENABLED:false}
         fixed-delay-ms: 5000
         initial-delay-ms: 5000
   security:
     java-password: ${WORKER_JAVA_PASSWORD:}
     dotnet-password: ${WORKER_DOTNET_PASSWORD:}
     worker-instance-registration:
-      enabled: false
+      enabled: ${JOB_MANAGER_WORKER_AUTH_ENABLED:false}
       signing-key-base64: ${WORKER_INSTANCE_JWT_KEY:}
 
 server:
